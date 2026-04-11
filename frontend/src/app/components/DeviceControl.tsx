@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
-import { Wind, Lightbulb, Droplets, Power, Activity, Zap, Loader2 } from "lucide-react";
-import type { ControlState } from "../lib/websocket";
+import { Fan, Lightbulb, Droplets, Power, Activity, Zap, Loader2 } from "lucide-react";
+import type { ControlState, DeviceItem } from "../lib/websocket";
 import { useRealtime } from "../contexts/RealtimeContext";
 
 const DEVICE_META: Record<
-  string,
+  "fan" | "light" | "pump",
   {
     label: string;
     description: string;
@@ -12,15 +12,21 @@ const DEVICE_META: Record<
     iconColor: string;
     iconBg: string;
     power: number;
+    activeClass: string;
+    activeGlowClass: string;
+    activeProgressClass: string;
   }
 > = {
   fan: {
     label: "Quạt thông gió",
     description: "Điều hòa nhiệt độ",
-    icon: Wind,
+    icon: Fan,
     iconColor: "text-blue-500",
     iconBg: "bg-blue-50",
     power: 0,
+    activeClass: "device-icon-fan",
+    activeGlowClass: "device-glow-fan",
+    activeProgressClass: "bg-blue-500",
   },
   light: {
     label: "Đèn chiếu sáng",
@@ -29,6 +35,9 @@ const DEVICE_META: Record<
     iconColor: "text-amber-500",
     iconBg: "bg-amber-50",
     power: 0,
+    activeClass: "device-icon-light",
+    activeGlowClass: "device-glow-light",
+    activeProgressClass: "bg-amber-500",
   },
   pump: {
     label: "Bơm tưới nước",
@@ -37,11 +46,76 @@ const DEVICE_META: Record<
     iconColor: "text-violet-500",
     iconBg: "bg-violet-50",
     power: 0,
+    activeClass: "device-icon-pump",
+    activeGlowClass: "device-glow-pump",
+    activeProgressClass: "bg-violet-500",
   },
 };
 
+type DeviceType = "fan" | "light" | "pump";
+
+type ViewDevice = {
+  id: number;
+  name: string;
+  code: string;
+  device_type: DeviceType;
+  status: "online" | "offline";
+  state: {
+    is_on: boolean;
+    updated_at?: string;
+  } | null;
+};
+
+const DEFAULT_DEVICES: ViewDevice[] = [
+  {
+    id: 1,
+    name: "Quạt thông gió",
+    code: "fan-1",
+    device_type: "fan",
+    status: "offline",
+    state: { is_on: false },
+  },
+  {
+    id: 2,
+    name: "Đèn chiếu sáng",
+    code: "light-1",
+    device_type: "light",
+    status: "offline",
+    state: { is_on: false },
+  },
+  {
+    id: 3,
+    name: "Bơm tưới nước",
+    code: "pump-1",
+    device_type: "pump",
+    status: "offline",
+    state: { is_on: false },
+  },
+];
+
 interface DeviceControlProps {
   control: ControlState | null;
+}
+
+function normalizeDevices(devices: DeviceItem[]): ViewDevice[] {
+  const picked = new Map<DeviceType, ViewDevice>();
+
+  for (const device of devices) {
+    if (device.device_type !== "fan" && device.device_type !== "light" && device.device_type !== "pump") {
+      continue;
+    }
+
+    picked.set(device.device_type, {
+      id: device.id,
+      name: device.name,
+      code: device.code,
+      device_type: device.device_type,
+      status: device.status,
+      state: device.state,
+    });
+  }
+
+  return DEFAULT_DEVICES.map((fallback) => picked.get(fallback.device_type) ?? fallback);
 }
 
 export function DeviceControl({ control }: DeviceControlProps) {
@@ -49,10 +123,7 @@ export function DeviceControl({ control }: DeviceControlProps) {
   const [togglingKey, setTogglingKey] = useState<string | null>(null);
   const [switchingAuto, setSwitchingAuto] = useState(false);
 
-  const visibleDevices = useMemo(
-    () => devices.filter((d) => d.device_type !== "controller" && !d.name.toLowerCase().includes("esp")),
-    [devices]
-  );
+  const visibleDevices = useMemo(() => normalizeDevices(devices), [devices]);
 
   const isAuto = control?.mode === "AUTO";
 
@@ -62,21 +133,22 @@ export function DeviceControl({ control }: DeviceControlProps) {
     setTimeout(() => setSwitchingAuto(false), 500);
   };
 
-  const handleToggle = async (deviceType: "fan" | "pump" | "light", isOn: boolean) => {
+  const handleToggle = async (deviceType: DeviceType, isOn: boolean) => {
     if (isAuto) return;
     setTogglingKey(deviceType);
     sendDeviceControl(deviceType, isOn ? "OFF" : "ON");
-    setTimeout(() => setTogglingKey(null), 400);
+    setTimeout(() => setTogglingKey(null), 100);
   };
 
   const handleAllDevices = async (turnOn: boolean) => {
     if (isAuto) return;
-    ["fan", "pump", "light"].forEach((device) => {
-      sendDeviceControl(device as "fan" | "pump" | "light", turnOn ? "ON" : "OFF");
+    (["fan", "pump", "light"] as DeviceType[]).forEach((device) => {
+      sendDeviceControl(device, turnOn ? "ON" : "OFF");
     });
   };
 
   const activeCount = visibleDevices.filter((d) => d.state?.is_on).length;
+  const onlineCount = visibleDevices.filter((d) => d.status === "online").length;
 
   return (
     <div className="elevated-card rounded-3xl overflow-hidden">
@@ -107,13 +179,6 @@ export function DeviceControl({ control }: DeviceControlProps) {
             {switchingAuto ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Power className="w-3.5 h-3.5" />}
             {isAuto ? "Tắt tự động" : "Bật tự động"}
           </button>
-
-          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 border border-blue-100 rounded-lg">
-            <Activity className="w-3.5 h-3.5 text-blue-600" />
-            <span className="text-blue-700" style={{ fontSize: "12px", fontWeight: 600 }}>
-              {activeCount}/{visibleDevices.length} hoạt động
-            </span>
-          </div>
         </div>
       </div>
 
@@ -127,99 +192,87 @@ export function DeviceControl({ control }: DeviceControlProps) {
           </div>
         )}
 
-        {visibleDevices.length === 0 ? (
-          <p className="text-center text-slate-400 py-6" style={{ fontSize: "13px" }}>
-            Không có thiết bị nào
-          </p>
-        ) : (
-          visibleDevices.map((device) => {
-            const meta = DEVICE_META[device.device_type] ?? {
-              label: device.name,
-              description: device.code,
-              icon: Zap,
-              iconColor: "text-slate-500",
-              iconBg: "bg-slate-50",
-              power: 0,
-            };
+        {visibleDevices.map((device) => {
+          const meta = DEVICE_META[device.device_type];
+          const Icon = meta.icon;
+          const isOn = device.state?.is_on ?? false;
+          const isToggling = togglingKey === device.device_type;
 
-            const Icon = meta.icon;
-            const isOn = device.state?.is_on ?? false;
-            const isToggling = togglingKey === device.device_type;
+          return (
+            <div
+              key={device.device_type}
+              className={`flex items-center gap-4 p-4 rounded-2xl border transition-all duration-300 ${
+                isOn ? "border-blue-100 bg-blue-50/50 shadow-[0_8px_20px_rgba(59,130,246,0.08)]" : "border-slate-200 bg-slate-50/60"
+              } ${isAuto ? "opacity-70" : ""}`}
+            >
+              <div className="relative w-11 h-11 flex items-center justify-center flex-shrink-0">
+                {isOn && <span className={`absolute inset-0 rounded-xl ${meta.activeGlowClass}`}></span>}
 
-            return (
-              <div
-                key={device.id}
-                className={`flex items-center gap-4 p-4 rounded-2xl border transition-all duration-200 ${
-                  isOn ? "border-blue-100 bg-blue-50/50" : "border-slate-200 bg-slate-50/60"
-                } ${isAuto ? "opacity-70" : ""}`}
-              >
                 <div
-                  className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 transition-all border ${
+                  className={`relative w-11 h-11 rounded-xl flex items-center justify-center transition-all border ${
                     isOn ? `${meta.iconBg} border-white` : "bg-white border-slate-200"
                   }`}
                 >
-                  <Icon className={`w-5 h-5 transition-colors ${isOn ? meta.iconColor : "text-slate-400"}`} />
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p
-                      className={`${isOn ? "text-slate-900" : "text-slate-500"}`}
-                      style={{ fontSize: "14px", fontWeight: 600 }}
-                    >
-                      {meta.label}
-                    </p>
-                    <span
-                      className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                        device.status === "online" ? "bg-blue-100 text-blue-700" : "bg-slate-200 text-slate-600"
-                      }`}
-                    >
-                      {device.status === "online" ? "Online" : "Offline"}
-                    </span>
-                  </div>
-                  <p className="text-slate-400" style={{ fontSize: "12px" }}>
-                    {meta.description} · {meta.power}W
-                  </p>
-
-                  {isOn && (
-                    <div className="mt-2 h-1.5 bg-slate-200 rounded-full overflow-hidden w-24">
-                      <div className="h-full bg-blue-500 rounded-full animate-pulse-soft" style={{ width: "70%" }}></div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex flex-col items-end gap-2">
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                      isOn ? "bg-blue-100 text-blue-700" : "bg-slate-200 text-slate-600"
+                  <Icon
+                    className={`w-5 h-5 transition-all duration-300 ${
+                      isOn ? `${meta.iconColor} ${meta.activeClass}` : "text-slate-400"
                     }`}
-                    style={{ fontSize: "11px" }}
-                  >
-                    {isOn ? "Bật" : "Tắt"}
-                  </span>
-
-                  <button
-                    onClick={() => handleToggle(device.device_type as "fan" | "pump" | "light", isOn)}
-                    disabled={isAuto || isToggling}
-                    className={`relative w-12 h-6 rounded-full transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed ${
-                      isOn ? "bg-blue-600" : "bg-slate-300"
-                    }`}
-                  >
-                    {isToggling ? (
-                      <Loader2 className="w-3.5 h-3.5 text-white absolute top-1 left-3.5 animate-spin" />
-                    ) : (
-                      <span
-                        className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all duration-300 ${
-                          isOn ? "left-6" : "left-0.5"
-                        }`}
-                      ></span>
-                    )}
-                  </button>
+                  />
                 </div>
               </div>
-            );
-          })
-        )}
+
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <p
+                    className={`${isOn ? "text-slate-900" : "text-slate-500"}`}
+                    style={{ fontSize: "14px", fontWeight: 600 }}
+                  >
+                    {meta.label}
+                  </p>
+                </div>
+
+                <p className="text-slate-400" style={{ fontSize: "12px" }}>
+                  {meta.description} · {meta.power}W
+                </p>
+
+                {isOn && (
+                  <div className="mt-2 h-1.5 bg-slate-200 rounded-full overflow-hidden w-24">
+                    <div className={`h-full rounded-full animate-pulse-soft ${meta.activeProgressClass}`} style={{ width: "70%" }}></div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-col items-end gap-2">
+                <span
+                  className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                    isOn ? "bg-blue-100 text-blue-700" : "bg-slate-200 text-slate-600"
+                  }`}
+                  style={{ fontSize: "11px" }}
+                >
+                  {isOn ? "Bật" : "Tắt"}
+                </span>
+
+                <button
+                  onClick={() => handleToggle(device.device_type, isOn)}
+                  disabled={isAuto || isToggling}
+                  className={`relative w-12 h-6 rounded-full transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed ${
+                    isOn ? "bg-blue-600" : "bg-slate-300"
+                  }`}
+                >
+                  {isToggling ? (
+                    <Loader2 className="w-3.5 h-3.5 text-white absolute top-1 left-3.5 animate-spin" />
+                  ) : (
+                    <span
+                      className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all duration-300 ${
+                        isOn ? "left-6" : "left-0.5"
+                      }`}
+                    ></span>
+                  )}
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       <div className="px-5 pb-5 flex gap-3">
