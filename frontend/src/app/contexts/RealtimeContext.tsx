@@ -2,10 +2,10 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import {
   GreenhouseWebSocket,
   type AlertItem,
+  type ControlState,
   type DeviceItem,
   type GreenhouseStatePacket,
   type SensorReading,
-  type ControlState,
 } from "../lib/websocket";
 
 export type DashboardOverview = {
@@ -72,8 +72,8 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     setOverview({
       latest: nextLatest,
       control: nextControl,
-      device_count: nextDevices.length,
-      online_devices: nextDevices.filter((d) => d.status === "online").length,
+      device_count: nextDevices.filter((d) => d.device_type !== "controller").length,
+      online_devices: nextDevices.filter((d) => d.device_type !== "controller" && d.status === "online").length,
       unread_alerts: nextAlerts.filter((a) => !a.is_read).length,
       uptime_hint: formatUptime(updatedAt),
       recent_alerts: nextAlerts.slice(0, 5),
@@ -151,8 +151,8 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
             prevOverview
               ? {
                   ...prevOverview,
-                  device_count: nextDevices.length,
-                  online_devices: nextDevices.filter((d) => d.status === "online").length,
+                  device_count: nextDevices.filter((d) => d.device_type !== "controller").length,
+                  online_devices: nextDevices.filter((d) => d.device_type !== "controller" && d.status === "online").length,
                 }
               : prevOverview
           );

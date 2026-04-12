@@ -46,9 +46,9 @@ export function Header({ sidebarOpen, setSidebarOpen, onLogout }: HeaderProps) {
           {/* <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse-soft"></span> */}
         </div>
 
-        <button className="p-2 rounded-xl hover:bg-slate-100 text-slate-500 hover:text-blue-600 transition-colors">
+        {/* <button className="p-2 rounded-xl hover:bg-slate-100 text-slate-500 hover:text-blue-600 transition-colors">
           <RefreshCw className="w-4 h-4" />
-        </button>
+        </button> */}
 
         <button className="relative p-2 rounded-xl hover:bg-slate-100 text-slate-500 hover:text-blue-600 transition-colors">
           <Bell className="w-4 h-4" />

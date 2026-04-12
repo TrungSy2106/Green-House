@@ -8,6 +8,7 @@ import {
   HelpCircle,
   ChevronRight,
   Map,
+  History,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -19,6 +20,7 @@ interface SidebarProps {
 const menuItems = [
   { id: "dashboard", label: "Tổng quan", icon: LayoutDashboard, badge: null },
   { id: "sensors", label: "Cảm biến", icon: Thermometer, badge: "4" },
+  { id: "history", label: "Lịch sử cảm biến", icon: History, badge: null },
   { id: "devices", label: "Thiết bị", icon: Cpu, badge: null },
   // { id: "zones", label: "Khu vực", icon: Map, badge: null },
   { id: "charts", label: "Biểu đồ", icon: BarChart3, badge: null },

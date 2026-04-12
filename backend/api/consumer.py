@@ -7,12 +7,11 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from django.core.serializers.json import DjangoJSONEncoder
 from django.utils import timezone
 
-from .models import Alert, ControlState, Device, SensorCurrent, SensorData
+from .models import Alert, ControlState, Device, SensorData
 from .serializers import (
     AlertSerializer,
     ControlStateSerializer,
     DeviceSerializer,
-    SensorCurrentSerializer,
     SensorDataSerializer,
 )
 from .services import (
@@ -33,25 +32,37 @@ def _control_state():
     return control
 
 
+def _esp32_online():
+    return Device.objects.filter(
+        device_type=Device.DeviceType.CONTROLLER,
+        status=Device.DeviceStatus.ONLINE,
+    ).exists()
+
+
 def _dashboard_packet():
-    current = SensorCurrent.objects.order_by("-recorded_at", "-id").first()
-    history = list(SensorData.objects.order_by("-recorded_at", "-id")[:20])
-    history.reverse()
-    alerts = list(Alert.objects.order_by("-happened_at", "-id")[:20])
     control = _control_state()
+    alerts = list(Alert.objects.order_by("-happened_at", "-id")[:20])
+    esp32_online = _esp32_online()
+
+    if esp32_online:
+        latest = SensorData.objects.order_by("-recorded_at", "-id").first()
+        history = list(SensorData.objects.order_by("-recorded_at", "-id")[:20])
+        history.reverse()
+        history_data = SensorDataSerializer(history, many=True).data
+        latest_data = SensorDataSerializer(latest).data if latest else None
+    else:
+        latest_data = None
+        history_data = []
 
     return {
         "type": "state",
         "data": {
-            "latest": SensorCurrentSerializer(current).data if current else None,
+            "latest": latest_data,
             "control": ControlStateSerializer(control).data,
             "devices": DeviceSerializer(Device.objects.order_by("id"), many=True).data,
             "alerts": AlertSerializer(alerts, many=True).data,
-            "history": SensorDataSerializer(history, many=True).data,
-            "esp32_online": Device.objects.filter(
-                device_type=Device.DeviceType.CONTROLLER,
-                status=Device.DeviceStatus.ONLINE,
-            ).exists(),
+            "history": history_data,
+            "esp32_online": esp32_online,
             "updated_at": timezone.now().isoformat(),
         },
     }

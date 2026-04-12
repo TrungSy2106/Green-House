@@ -4,6 +4,7 @@ import { Sidebar } from "./components/Sidebar";
 import { SensorCards } from "./components/SensorCards";
 import { DeviceControl } from "./components/DeviceControl";
 import { SensorChart } from "./components/SensorChart";
+import { SensorHistory } from "./components/SensorHistory";
 import { AutoSettings } from "./components/AutoSettings";
 import { StatusBar } from "./components/StatusBar";
 import { Alerts } from "./components/Alerts";
@@ -39,6 +40,7 @@ function Dashboard() {
             <h2 className="text-slate-900" style={{ fontSize: "24px", fontWeight: 800 }}>
               {activeMenu === "dashboard" && "Tổng quan hệ thống"}
               {activeMenu === "sensors" && "Quản lý cảm biến"}
+              {activeMenu === "history" && "Lịch sử cảm biến"}
               {activeMenu === "devices" && "Điều khiển thiết bị"}
               {activeMenu === "zones" && "Quản lý khu vực"}
               {activeMenu === "charts" && "Biểu đồ & Báo cáo"}
@@ -46,7 +48,7 @@ function Dashboard() {
               {activeMenu === "settings" && "Cài đặt hệ thống"}
               {activeMenu === "help" && "Trợ giúp"}
             </h2>
-            <p className="text-slate-500" style={{ fontSize: "12px" }}>
+            {/* <p className="text-slate-500" style={{ fontSize: "12px" }}>
               {!connected
                 ? "⚠ Mất kết nối WebSocket"
                 : `Cập nhật lần cuối: ${
@@ -56,18 +58,8 @@ function Dashboard() {
                       second: "2-digit",
                     }) ?? "—"
                   }`}
-            </p>
+            </p> */}
           </div>
-
-          <button
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-            className="gradient-action flex items-center gap-2 px-4 py-2 text-white rounded-2xl transition-all duration-300 disabled:opacity-60 hover:-translate-y-0.5"
-            style={{ fontSize: "13px", fontWeight: 700 }}
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
-            Làm mới
-          </button>
         </div>
 
         {activeMenu === "dashboard" && (
@@ -110,6 +102,8 @@ function Dashboard() {
             <SensorChart />
           </div>
         )}
+
+        {activeMenu === "history" && <SensorHistory />}
 
         {activeMenu === "devices" && (
           <div className="max-w-lg">

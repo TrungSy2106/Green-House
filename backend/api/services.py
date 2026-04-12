@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from decimal import Decimal
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
@@ -9,24 +8,12 @@ from django.conf import settings
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .models import Alert, Device, DeviceCommand, DeviceState, SensorCurrent, SensorData, ThresholdRule
+from .models import Alert, Device, DeviceCommand, DeviceState, SensorData
 from .serializers import DeviceCommandSerializer
 
 
 HEARTBEAT_TIMEOUT_SECONDS = 15
 HEARTBEAT_SLOW_SECONDS = 30
-
-METRIC_FIELD_MAP = {
-    'temperature': 'temperature',
-    'humidity': 'humidity',
-    'light': 'light',
-    'soil_moisture': 'soil_moisture',
-}
-
-
-def get_metric_value(sensor_data: SensorData, metric: str):
-    field_name = METRIC_FIELD_MAP.get(metric)
-    return getattr(sensor_data, field_name, None) if field_name else None
 
 
 def get_controller(device_code: str = 'esp32-main') -> Device:
@@ -121,57 +108,6 @@ def refresh_device_statuses(now=None):
             )
 
 
-def evaluate_rules(sensor_data: SensorData):
-    now = timezone.now()
-
-    for rule in ThresholdRule.objects.filter(enabled=True).select_related('target_device'):
-        value = get_metric_value(sensor_data, rule.metric)
-        if value is None:
-            continue
-
-        breached = False
-        if rule.condition == ThresholdRule.Condition.LTE:
-            breached = Decimal(value) <= rule.threshold
-        elif rule.condition == ThresholdRule.Condition.GTE:
-            breached = Decimal(value) >= rule.threshold
-
-        if not breached:
-            continue
-
-        if rule.last_triggered_at and (now - rule.last_triggered_at).total_seconds() < rule.cooldown_seconds:
-            continue
-
-        title = f'Ngưỡng {rule.metric} bị vượt'
-        message = rule.message_template or f'{rule.metric}={value} đã chạm ngưỡng {rule.condition} {rule.threshold}'
-
-        Alert.objects.create(
-            level=Alert.Level.WARNING,
-            title=title,
-            message=message,
-            source_rule=rule,
-            sensor_data=sensor_data,
-            device=rule.target_device,
-        )
-
-        if rule.action_type in {ThresholdRule.ActionType.TOGGLE_DEVICE, ThresholdRule.ActionType.SET_DEVICE} and rule.target_device:
-            desired_on = str(rule.target_value).lower() in {'1', 'on', 'true', 'yes'}
-            state, _ = DeviceState.objects.get_or_create(device=rule.target_device)
-            state.desired_on = desired_on
-            state.last_command = 'auto_rule'
-            state.last_value = 'on' if desired_on else 'off'
-            state.save(update_fields=['desired_on', 'last_command', 'last_value', 'updated_at'])
-
-            enqueue_device_command(
-                device=rule.target_device,
-                command='set_power',
-                value='on' if desired_on else 'off',
-                payload={'rule_id': rule.id, 'metric': rule.metric},
-            )
-
-        rule.last_triggered_at = now
-        rule.save(update_fields=['last_triggered_at', 'updated_at'])
-
-
 def build_uptime_hint() -> str:
     refresh_device_statuses()
 
@@ -245,19 +181,6 @@ def ingest_sensor_payload(payload: dict, device_code: str = 'esp32-main'):
         recorded_at=recorded_at,
     )
 
-    SensorCurrent.objects.update_or_create(
-        singleton_key='main',
-        defaults={
-            'temperature': reading.temperature,
-            'humidity': reading.humidity,
-            'light': reading.light,
-            'soil_moisture': reading.soil_moisture,
-            'payload': reading.payload,
-            'recorded_at': reading.recorded_at,
-            'source_reading': reading,
-        },
-    )
-
     controller = get_controller(device_code=device_code)
     metadata = payload.get('metadata') or {}
     metadata = {**metadata, 'transport': 'websocket'}
@@ -289,7 +212,6 @@ def ingest_sensor_payload(payload: dict, device_code: str = 'esp32-main'):
         state.last_value = 'on' if current_value else 'off'
         state.save(update_fields=['is_on', 'desired_on', 'last_command', 'last_value', 'updated_at'])
 
-    evaluate_rules(reading)
     notify_pending_commands(device_code=device_code)
     return reading
 
@@ -297,7 +219,7 @@ def ingest_sensor_payload(payload: dict, device_code: str = 'esp32-main'):
 def ingest_heartbeat_payload(payload: dict, device_code: str = 'esp32-main'):
     controller = get_controller(device_code=device_code)
     metadata = payload.get('metadata') or {}
-    metadata = {**metadata, 'transport': 'websocket'}
+    metadata = {**metadata, 'uptime_ms': payload.get('uptime_ms'), 'free_heap': payload.get('free_heap')}
     sync_device_online(
         controller,
         firmware_version=payload.get('firmware_version'),
@@ -306,14 +228,25 @@ def ingest_heartbeat_payload(payload: dict, device_code: str = 'esp32-main'):
     return controller
 
 
-def ack_device_command_payload(payload: dict):
-    command_id = payload.get('command_id')
-    if not command_id:
-        raise ValueError('Thiếu command_id')
+def enqueue_device_command(device: Device, command: str, value: str = '', payload: dict | None = None):
+    cmd = DeviceCommand.objects.create(
+        device=device,
+        command=command,
+        value=value,
+        payload=payload or {},
+    )
+    return cmd
 
-    cmd = DeviceCommand.objects.select_related('device').filter(pk=command_id).first()
-    if not cmd:
-        raise ValueError('Command không tồn tại')
+
+def ack_device_command_payload(payload: dict):
+    command_id = payload.get('id') or payload.get('command_id')
+    if not command_id:
+        return None
+
+    try:
+        cmd = DeviceCommand.objects.select_related('device').get(pk=command_id)
+    except DeviceCommand.DoesNotExist:
+        return None
 
     cmd.status = payload.get('status') or DeviceCommand.CommandStatus.ACK
     cmd.acked_at = timezone.now()
@@ -321,13 +254,15 @@ def ack_device_command_payload(payload: dict):
 
     state, _ = DeviceState.objects.get_or_create(device=cmd.device)
 
-    if 'actual_state' in payload:
-        actual_state = _to_bool(payload.get('actual_state'))
-        state.is_on = actual_state
-        state.desired_on = actual_state
+    actual_state = payload.get('actual_state')
+    if actual_state is not None:
+        actual_on = _to_bool(actual_state)
+        state.is_on = actual_on
+        state.desired_on = actual_on
     elif cmd.value.lower() in {'on', 'off'}:
-        state.is_on = cmd.value.lower() == 'on'
-        state.desired_on = state.is_on
+        actual_on = cmd.value.lower() == 'on'
+        state.is_on = actual_on
+        state.desired_on = actual_on
 
     state.last_command = cmd.command
     state.last_value = cmd.value
@@ -336,40 +271,10 @@ def ack_device_command_payload(payload: dict):
     sync_device_online(cmd.device)
     return cmd
 
-def enqueue_device_command(*, device: Device, command: str, value: str = '', payload: dict | None = None):
-    """Chỉ giữ lệnh pending mới nhất cho mỗi cặp device + command."""
-    payload = payload or {}
 
-    pending = (
-        DeviceCommand.objects
-        .filter(
-            device=device,
-            command=command,
-            status=DeviceCommand.CommandStatus.PENDING,
-        )
-        .order_by('-created_at', '-id')
-        .first()
-    )
-
-    if pending:
-        pending.value = value
-        pending.payload = payload
-        pending.save(update_fields=['value', 'payload', 'updated_at'])
-
-        DeviceCommand.objects.filter(
-            device=device,
-            command=command,
-            status=DeviceCommand.CommandStatus.PENDING,
-        ).exclude(pk=pending.pk).update(
-            status=DeviceCommand.CommandStatus.FAILED,
-            payload={'reason': 'obsolete_replaced_by_newer_command'},
-            updated_at=timezone.now(),
-        )
-        return pending
-
-    return DeviceCommand.objects.create(
-        device=device,
-        command=command,
-        value=value,
-        payload=payload,
-    )
+def get_ws_frontend_url() -> str:
+    host = getattr(settings, 'WS_FRONTEND_HOST', 'localhost')
+    port = getattr(settings, 'WS_FRONTEND_PORT', 8000)
+    secure = getattr(settings, 'WS_FRONTEND_SECURE', False)
+    scheme = 'wss' if secure else 'ws'
+    return f'{scheme}://{host}:{port}/ws/frontend/'

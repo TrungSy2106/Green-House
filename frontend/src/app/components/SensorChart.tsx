@@ -96,10 +96,7 @@ export function SensorChart() {
               <BarChart3 className="w-4 h-4 text-blue-600" />
             </div>
             <div>
-              <h3 className="text-slate-900">Lịch sử dữ liệu cảm biến</h3>
-              <p className="text-slate-400" style={{ fontSize: "11px" }}>
-                Dữ liệu realtime từ WebSocket
-              </p>
+              <h3 className="text-slate-900">Dữ liệu cảm biến</h3>
             </div>
           </div>
         </div>

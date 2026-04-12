@@ -188,15 +188,6 @@ export function SensorCards({ data }: SensorCardsProps) {
                 />
               </div>
 
-              <div className="relative h-0">
-                <div
-                  className="absolute h-2 bg-blue-100 rounded-sm -top-2"
-                  style={{
-                    left: `${((card.optimal.min - card.min) / (card.max - card.min)) * 100}%`,
-                    width: `${((card.optimal.max - card.optimal.min) / (card.max - card.min)) * 100}%`,
-                  }}
-                />
-              </div>
             </div>
 
             <div className="flex items-center justify-between mt-4">

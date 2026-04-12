@@ -17,9 +17,7 @@ from .models import (
     Device,
     DeviceCommand,
     DeviceState,
-    SensorCurrent,
     SensorData,
-    ThresholdRule,
 )
 from .serializers import (
     AlertSerializer,
@@ -27,10 +25,16 @@ from .serializers import (
     DeviceCommandSerializer,
     DeviceSerializer,
     LoginSerializer,
-    SensorCurrentSerializer,
-    ThresholdRuleSerializer,
+    SensorDataSerializer,
 )
-from .services import build_uptime_hint, enqueue_device_command, notify_pending_commands, refresh_device_statuses
+from .services import (
+    build_uptime_hint,
+    enqueue_device_command,
+    ingest_sensor_payload,
+    notify_pending_commands,
+    refresh_device_statuses,
+)
+
 
 def _check_ingest_token(request):
     header = request.headers.get('X-Device-Token') or ''
@@ -78,6 +82,14 @@ def _turn_off_all_actuators():
     notify_pending_commands()
 
 
+def _esp32_online() -> bool:
+    refresh_device_statuses()
+    return Device.objects.filter(
+        device_type=Device.DeviceType.CONTROLLER,
+        status=Device.DeviceStatus.ONLINE,
+    ).exists()
+
+
 class LoginView(TokenObtainPairView):
     permission_classes = [permissions.AllowAny]
     serializer_class = LoginSerializer
@@ -87,12 +99,13 @@ class DashboardOverviewView(APIView):
     def get(self, request):
         refresh_device_statuses()
 
-        current = SensorCurrent.objects.order_by('-recorded_at', '-id').first()
+        esp32_online = _esp32_online()
+        latest = SensorData.objects.order_by('-recorded_at', '-id').first() if esp32_online else None
         recent_alerts = Alert.objects.order_by('-happened_at', '-id')[:5]
         control = _get_control_state()
 
         payload = {
-            'latest': SensorCurrentSerializer(current).data if current else None,
+            'latest': SensorDataSerializer(latest).data if latest else None,
             'control': ControlStateSerializer(control).data,
             'device_count': Device.objects.exclude(device_type=Device.DeviceType.CONTROLLER).count(),
             'online_devices': Device.objects.exclude(device_type=Device.DeviceType.CONTROLLER).filter(
@@ -101,27 +114,21 @@ class DashboardOverviewView(APIView):
             'unread_alerts': Alert.objects.filter(is_read=False).count(),
             'uptime_hint': build_uptime_hint(),
             'recent_alerts': AlertSerializer(recent_alerts, many=True).data,
-            'esp32_online': Device.objects.filter(
-                device_type=Device.DeviceType.CONTROLLER,
-                status=Device.DeviceStatus.ONLINE,
-            ).exists(),
+            'esp32_online': esp32_online,
         }
         return Response(payload)
 
 
 class LatestReadingView(APIView):
     def get(self, request):
-        esp32_online = Device.objects.filter(
-            device_type=Device.DeviceType.CONTROLLER,
-            status=Device.DeviceStatus.ONLINE,
-        ).exists()
+        esp32_online = _esp32_online()
         if not esp32_online:
             return Response(None)
 
-        current = SensorCurrent.objects.order_by('-recorded_at', '-id').first()
-        if not current:
+        latest = SensorData.objects.order_by('-recorded_at', '-id').first()
+        if not latest:
             return Response(None)
-        return Response(SensorCurrentSerializer(current).data)
+        return Response(SensorDataSerializer(latest).data)
 
 
 class ChartView(APIView):
@@ -132,6 +139,13 @@ class ChartView(APIView):
         if metric not in {'temperature', 'humidity', 'light', 'soil_moisture'}:
             raise ValidationError('metric không hợp lệ')
 
+        esp32_online = _esp32_online()
+        if not esp32_online:
+            return Response({
+                'metric': metric,
+                'points': [],
+            })
+
         since = timezone.now() - timedelta(hours=hours)
         points = []
 
@@ -140,6 +154,57 @@ class ChartView(APIView):
             points.append({'recorded_at': item.recorded_at, 'value': value})
 
         return Response({'metric': metric, 'points': points})
+
+
+class SensorHistoryView(APIView):
+    def get(self, request):
+        page = max(int(request.query_params.get('page', 1)), 1)
+        page_size = min(max(int(request.query_params.get('page_size', 20)), 5), 100)
+
+        queryset = SensorData.objects.order_by('-recorded_at', '-id')
+
+        hours_raw = request.query_params.get('hours')
+        date_from_raw = request.query_params.get('date_from')
+        date_to_raw = request.query_params.get('date_to')
+
+        if date_from_raw:
+            date_from = parse_datetime(date_from_raw)
+            if not date_from:
+                raise ValidationError('date_from không hợp lệ')
+            if timezone.is_naive(date_from):
+                date_from = timezone.make_aware(date_from, timezone.get_current_timezone())
+            queryset = queryset.filter(recorded_at__gte=date_from)
+
+        if date_to_raw:
+            date_to = parse_datetime(date_to_raw)
+            if not date_to:
+                raise ValidationError('date_to không hợp lệ')
+            if timezone.is_naive(date_to):
+                date_to = timezone.make_aware(date_to, timezone.get_current_timezone())
+            queryset = queryset.filter(recorded_at__lte=date_to)
+
+        if hours_raw and not date_from_raw and not date_to_raw:
+            hours = max(int(hours_raw), 1)
+            since = timezone.now() - timedelta(hours=hours)
+            queryset = queryset.filter(recorded_at__gte=since)
+
+        total = queryset.count()
+        total_pages = max((total + page_size - 1) // page_size, 1)
+
+        if page > total_pages:
+            page = total_pages
+
+        start = (page - 1) * page_size
+        end = start + page_size
+        rows = queryset[start:end]
+
+        return Response({
+            'items': SensorDataSerializer(rows, many=True).data,
+            'page': page,
+            'page_size': page_size,
+            'total': total,
+            'total_pages': total_pages,
+        })
 
 
 class ControlStateView(APIView):
@@ -263,89 +328,12 @@ class AlertMarkAllReadView(APIView):
         return Response({'updated': updated})
 
 
-class RuleListView(generics.ListCreateAPIView):
-    queryset = ThresholdRule.objects.select_related('target_device').order_by('metric', 'condition', 'id')
-    serializer_class = ThresholdRuleSerializer
-
-
-class RuleDetailView(generics.RetrieveUpdateAPIView):
-    queryset = ThresholdRule.objects.select_related('target_device').all()
-    serializer_class = ThresholdRuleSerializer
-
-
 class IngestReadingsView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
         _check_ingest_token(request)
-
-        recorded_raw = request.data.get('recorded_at')
-        recorded_at = parse_datetime(recorded_raw) if isinstance(recorded_raw, str) else recorded_raw
-        recorded_at = recorded_at or timezone.now()
-
-        reading = SensorData.objects.create(
-            temperature=request.data.get('temperature'),
-            humidity=request.data.get('humidity'),
-            light=request.data.get('light'),
-            soil_moisture=request.data.get('soil_moisture'),
-            payload=request.data.get('payload') or {},
-            recorded_at=recorded_at,
-        )
-
-        SensorCurrent.objects.update_or_create(
-            singleton_key='main',
-            defaults={
-                'temperature': reading.temperature,
-                'humidity': reading.humidity,
-                'light': reading.light,
-                'soil_moisture': reading.soil_moisture,
-                'payload': reading.payload,
-                'recorded_at': reading.recorded_at,
-                'source_reading': reading,
-            },
-        )
-
-        controller, _ = Device.objects.get_or_create(
-            code='esp32-main',
-            defaults={
-                'name': 'ESP32 Main',
-                'device_type': Device.DeviceType.CONTROLLER,
-                'status': Device.DeviceStatus.OFFLINE,
-            },
-        )
-        controller.status = Device.DeviceStatus.ONLINE
-        controller.last_seen_at = timezone.now()
-        firmware = request.data.get('firmware_version')
-        if firmware:
-            controller.firmware_version = firmware
-            controller.save(update_fields=['status', 'last_seen_at', 'firmware_version', 'updated_at'])
-        else:
-            controller.save(update_fields=['status', 'last_seen_at', 'updated_at'])
-
-        states = request.data.get('device_states') or {}
-        state_map = {'fan_on': 'fan', 'pump_on': 'pump', 'light_on': 'light'}
-
-        for field_name, device_type in state_map.items():
-            if field_name not in states:
-                continue
-
-            device = Device.objects.filter(device_type=device_type).first()
-            if not device:
-                continue
-
-            device.status = Device.DeviceStatus.ONLINE
-            device.last_seen_at = timezone.now()
-            device.save(update_fields=['status', 'last_seen_at', 'updated_at'])
-
-            current_value = _to_bool(states[field_name])
-
-            state, _ = DeviceState.objects.get_or_create(device=device)
-            state.is_on = current_value
-            state.desired_on = current_value
-            state.last_command = 'telemetry_sync'
-            state.last_value = 'on' if current_value else 'off'
-            state.save(update_fields=['is_on', 'desired_on', 'last_command', 'last_value', 'updated_at'])
-
+        reading = ingest_sensor_payload(request.data, device_code='esp32-main')
         return Response({'id': reading.id, 'message': 'Đã nhận dữ liệu cảm biến'})
 
 

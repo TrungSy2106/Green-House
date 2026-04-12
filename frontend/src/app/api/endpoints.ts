@@ -43,20 +43,67 @@ export interface SensorReading {
   soil_moisture: number | null;
   recorded_at: string;
 }
+
 export const getLatestReading = () =>
   apiClient.get<SensorReading>("/sensor-readings/latest/");
 
 export type ChartMetric = "temperature" | "humidity" | "light" | "soil_moisture";
+
 export interface ChartPoint {
   recorded_at: string;
   value: number;
 }
+
 export interface ChartResponse {
   metric: ChartMetric;
   points: ChartPoint[];
 }
+
 export const getChartData = (metric: ChartMetric, hours: number) =>
   apiClient.get<ChartResponse>(`/sensor-readings/chart/?metric=${metric}&hours=${hours}`);
+
+export interface SensorHistoryResponse {
+  items: SensorReading[];
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
+}
+
+export interface SensorHistoryParams {
+  page?: number;
+  pageSize?: number;
+  hours?: number;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+export const getSensorHistory = ({
+  page = 1,
+  pageSize = 20,
+  hours,
+  dateFrom,
+  dateTo,
+}: SensorHistoryParams = {}) => {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  });
+
+  if (dateFrom) {
+    params.set("date_from", dateFrom);
+  }
+
+  if (dateTo) {
+    params.set("date_to", dateTo);
+  }
+
+  if (!dateFrom && !dateTo && hours && hours > 0) {
+    params.set("hours", String(hours));
+  }
+
+  return apiClient.get<SensorHistoryResponse>(`/sensor-readings/history/?${params.toString()}`);
+};
 
 // ─── Devices ─────────────────────────────────────────────────────────────────
 export interface DeviceItem {
@@ -94,22 +141,3 @@ export const markAlertRead = (pk: number) =>
   apiClient.post<AlertItem>(`/alerts/${pk}/mark_read/`);
 export const markAllAlertsRead = () =>
   apiClient.post<{ updated: number }>("/alerts/mark_all_read/");
-
-// ─── Rules ───────────────────────────────────────────────────────────────────
-export interface RuleItem {
-  id: number;
-  metric: "temperature" | "humidity" | "light" | "soil_moisture";
-  condition: "lte" | "gte";
-  threshold: number;
-  action_type: "alert_only" | "toggle_device" | "set_device";
-  target_device: number | null;
-  target_value: string;
-  enabled: boolean;
-  cooldown_seconds: number;
-  message_template: string;
-}
-export const getRules = () => apiClient.get<RuleItem[]>("/rules/");
-export const createRule = (data: Partial<RuleItem>) =>
-  apiClient.post<RuleItem>("/rules/", data);
-export const updateRule = (pk: number, data: Partial<RuleItem>) =>
-  apiClient.patch<RuleItem>(`/rules/${pk}/`, data);

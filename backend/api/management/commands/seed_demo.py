@@ -6,7 +6,7 @@ from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from api.models import Alert, Device, DeviceCommand, DeviceState, SensorCurrent, SensorData
+from api.models import Alert, Device, DeviceCommand, DeviceState, SensorData
 
 
 class Command(BaseCommand):
@@ -68,7 +68,6 @@ class Command(BaseCommand):
 
         Alert.objects.all().delete()
         DeviceCommand.objects.all().delete()
-        SensorCurrent.objects.all().delete()
         SensorData.objects.all().delete()
 
         samples = [
@@ -103,20 +102,6 @@ class Command(BaseCommand):
             created.append(reading)
 
         latest = created[-1]
-
-        # ===== 4) Cập nhật current snapshot =====
-        SensorCurrent.objects.update_or_create(
-            singleton_key='main',
-            defaults={
-                'temperature': latest.temperature,
-                'humidity': latest.humidity,
-                'light': latest.light,
-                'soil_moisture': latest.soil_moisture,
-                'payload': latest.payload,
-                'recorded_at': latest.recorded_at,
-                'source_reading': latest,
-            },
-        )
 
         controller.status = Device.DeviceStatus.ONLINE
         controller.last_seen_at = latest.recorded_at

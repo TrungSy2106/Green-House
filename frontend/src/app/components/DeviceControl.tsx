@@ -93,10 +93,6 @@ const DEFAULT_DEVICES: ViewDevice[] = [
   },
 ];
 
-interface DeviceControlProps {
-  control: ControlState | null;
-}
-
 function normalizeDevices(devices: DeviceItem[]): ViewDevice[] {
   const picked = new Map<DeviceType, ViewDevice>();
 
@@ -118,13 +114,16 @@ function normalizeDevices(devices: DeviceItem[]): ViewDevice[] {
   return DEFAULT_DEVICES.map((fallback) => picked.get(fallback.device_type) ?? fallback);
 }
 
+interface DeviceControlProps {
+  control: ControlState | null;
+}
+
 export function DeviceControl({ control }: DeviceControlProps) {
   const { devices, sendMode, sendDeviceControl } = useRealtime();
-  const [togglingKey, setTogglingKey] = useState<string | null>(null);
+  const [togglingKey, setTogglingKey] = useState<DeviceType | null>(null);
   const [switchingAuto, setSwitchingAuto] = useState(false);
 
   const visibleDevices = useMemo(() => normalizeDevices(devices), [devices]);
-
   const isAuto = control?.mode === "AUTO";
 
   const handleToggleAuto = async () => {
@@ -232,14 +231,9 @@ export function DeviceControl({ control }: DeviceControlProps) {
                 </div>
 
                 <p className="text-slate-400" style={{ fontSize: "12px" }}>
-                  {meta.description} · {meta.power}W
+                  {meta.description}
                 </p>
 
-                {isOn && (
-                  <div className="mt-2 h-1.5 bg-slate-200 rounded-full overflow-hidden w-24">
-                    <div className={`h-full rounded-full animate-pulse-soft ${meta.activeProgressClass}`} style={{ width: "70%" }}></div>
-                  </div>
-                )}
               </div>
 
               <div className="flex flex-col items-end gap-2">

@@ -10,9 +10,7 @@ from .models import (
     Device,
     DeviceCommand,
     DeviceState,
-    SensorCurrent,
     SensorData,
-    ThresholdRule,
 )
 
 
@@ -90,31 +88,6 @@ class SensorDataSerializer(serializers.ModelSerializer):
         return getattr(settings, 'APP_ZONE_NAME', 'Nhà kính chính')
 
 
-class SensorCurrentSerializer(serializers.ModelSerializer):
-    zone = serializers.SerializerMethodField()
-    zone_name = serializers.SerializerMethodField()
-
-    class Meta:
-        model = SensorCurrent
-        fields = [
-            'id',
-            'zone',
-            'zone_name',
-            'temperature',
-            'humidity',
-            'light',
-            'soil_moisture',
-            'payload',
-            'recorded_at',
-        ]
-
-    def get_zone(self, obj):
-        return getattr(settings, 'APP_ZONE_ID', 1)
-
-    def get_zone_name(self, obj):
-        return getattr(settings, 'APP_ZONE_NAME', 'Nhà kính chính')
-
-
 class ControlStateSerializer(serializers.ModelSerializer):
     class Meta:
         model = ControlState
@@ -149,39 +122,6 @@ class AlertSerializer(serializers.ModelSerializer):
 
     def get_device_name(self, obj):
         return obj.device.name if obj.device else ''
-
-
-class ThresholdRuleSerializer(serializers.ModelSerializer):
-    zone = serializers.SerializerMethodField()
-    zone_name = serializers.SerializerMethodField()
-    target_device_name = serializers.SerializerMethodField()
-
-    class Meta:
-        model = ThresholdRule
-        fields = [
-            'id',
-            'zone',
-            'zone_name',
-            'metric',
-            'condition',
-            'threshold',
-            'action_type',
-            'target_device',
-            'target_device_name',
-            'target_value',
-            'enabled',
-            'cooldown_seconds',
-            'message_template',
-        ]
-
-    def get_zone(self, obj):
-        return getattr(settings, 'APP_ZONE_ID', 1)
-
-    def get_zone_name(self, obj):
-        return getattr(settings, 'APP_ZONE_NAME', 'Nhà kính chính')
-
-    def get_target_device_name(self, obj):
-        return obj.target_device.name if obj.target_device else ''
 
 
 class DeviceCommandSerializer(serializers.ModelSerializer):

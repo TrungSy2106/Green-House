@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Alert, Device, DeviceCommand, DeviceState, SensorData, ThresholdRule
+from .models import Alert, Device, DeviceCommand, DeviceState, SensorData
 
 
 @admin.register(Device)
@@ -18,12 +18,6 @@ class DeviceStateAdmin(admin.ModelAdmin):
 class SensorDataAdmin(admin.ModelAdmin):
     list_display = ('id', 'temperature', 'humidity', 'light', 'soil_moisture', 'recorded_at')
     date_hierarchy = 'recorded_at'
-
-
-@admin.register(ThresholdRule)
-class ThresholdRuleAdmin(admin.ModelAdmin):
-    list_display = ('id', 'metric', 'condition', 'threshold', 'action_type', 'target_device', 'enabled')
-    list_filter = ('metric', 'condition', 'action_type', 'enabled')
 
 
 @admin.register(Alert)

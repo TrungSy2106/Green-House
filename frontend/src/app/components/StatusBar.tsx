@@ -31,7 +31,6 @@ export function StatusBar({ overview }: StatusBarProps) {
 
   const stats = [
     { label: "Uptime", value: uptimeHint, icon: Clock },
-    { label: "Thiết bị online", value: `${onlineDevices}/${deviceCount}`, icon: backendReachable ? Wifi : WifiOff },
     { label: "Mode", value: mode, icon: mode === "AUTO" ? Bot : Hand },
   ];
 
