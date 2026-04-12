@@ -1,8 +1,9 @@
-import { Thermometer, Droplets, Sun, Sprout, TrendingUp, TrendingDown, Minus } from "lucide-react";
-import type { SensorReading } from "../lib/websocket";
+import { Thermometer, Droplets, Sun, Sprout, TrendingUp, TrendingDown, Minus, AlertTriangle } from "lucide-react";
+import type { SensorErrors, SensorReading } from "../lib/websocket";
 
 interface SensorCardsProps {
   data: SensorReading | null;
+  sensorErrors?: SensorErrors;
 }
 
 type TrendType = "up" | "down" | "stable";
@@ -10,6 +11,7 @@ type TrendType = "up" | "down" | "stable";
 interface CardConfig {
   label: string;
   apiKey: keyof SensorReading;
+  errorKey: keyof SensorErrors;
   unit: string;
   icon: React.ElementType;
   iconBg: string;
@@ -26,6 +28,7 @@ const cardConfigs: CardConfig[] = [
   {
     label: "Nhiệt độ",
     apiKey: "temperature",
+    errorKey: "dht",
     unit: "°C",
     icon: Thermometer,
     iconBg: "bg-orange-50",
@@ -40,6 +43,7 @@ const cardConfigs: CardConfig[] = [
   {
     label: "Độ ẩm không khí",
     apiKey: "humidity",
+    errorKey: "dht",
     unit: "%",
     icon: Droplets,
     iconBg: "bg-blue-50",
@@ -54,6 +58,7 @@ const cardConfigs: CardConfig[] = [
   {
     label: "Ánh sáng",
     apiKey: "light",
+    errorKey: "light",
     unit: "%",
     icon: Sun,
     iconBg: "bg-amber-50",
@@ -68,6 +73,7 @@ const cardConfigs: CardConfig[] = [
   {
     label: "Độ ẩm đất",
     apiKey: "soil_moisture",
+    errorKey: "soil",
     unit: "%",
     icon: Sprout,
     iconBg: "bg-violet-50",
@@ -117,7 +123,14 @@ function formatValue(value: unknown) {
   return num === null ? "—" : num.toFixed(1);
 }
 
-export function SensorCards({ data }: SensorCardsProps) {
+const defaultSensorErrors: SensorErrors = {
+  dht: false,
+  soil: false,
+  light: false,
+  gas: false,
+};
+
+export function SensorCards({ data, sensorErrors = defaultSensorErrors }: SensorCardsProps) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
       {cardConfigs.map((card) => {
@@ -125,7 +138,8 @@ export function SensorCards({ data }: SensorCardsProps) {
 
         const rawValue = data ? data[card.apiKey] : null;
         const numericValue = toNumberOrNull(rawValue);
-        const hasData = numericValue !== null;
+        const isError = !!sensorErrors[card.errorKey];
+        const hasData = numericValue !== null && !isError;
         const value = numericValue ?? 0;
 
         const percent = hasData
@@ -187,11 +201,18 @@ export function SensorCards({ data }: SensorCardsProps) {
                   style={{ width: `${percent}%`, background: card.progressColor }}
                 />
               </div>
-
             </div>
 
             <div className="flex items-center justify-between mt-4">
-              {status ? (
+              {isError ? (
+                <span
+                  className="px-2.5 py-1 rounded-full border border-red-100 bg-red-50 text-red-700 inline-flex items-center gap-1.5"
+                  style={{ fontSize: "11px", fontWeight: 600 }}
+                >
+                  <AlertTriangle className="w-3 h-3" />
+                  Lỗi cảm biến
+                </span>
+              ) : status ? (
                 <span
                   className={`px-2.5 py-1 rounded-full border ${status.color}`}
                   style={{ fontSize: "11px", fontWeight: 600 }}

@@ -39,10 +39,32 @@ def _esp32_online():
     ).exists()
 
 
+def _current_sensor_errors():
+    controller = Device.objects.filter(device_type=Device.DeviceType.CONTROLLER).first()
+    if not controller:
+        return {
+            "dht": False,
+            "soil": False,
+            "light": False,
+            "gas": False,
+        }
+
+    metadata = controller.metadata or {}
+    sensor_errors = metadata.get("sensor_errors") or {}
+
+    return {
+        "dht": bool(sensor_errors.get("dht", False)),
+        "soil": bool(sensor_errors.get("soil", False)),
+        "light": bool(sensor_errors.get("light", False)),
+        "gas": bool(sensor_errors.get("gas", False)),
+    }
+
+
 def _dashboard_packet():
     control = _control_state()
     alerts = list(Alert.objects.order_by("-happened_at", "-id")[:20])
     esp32_online = _esp32_online()
+    sensor_errors = _current_sensor_errors()
 
     if esp32_online:
         latest = SensorData.objects.order_by("-recorded_at", "-id").first()
@@ -62,6 +84,7 @@ def _dashboard_packet():
             "devices": DeviceSerializer(Device.objects.order_by("id"), many=True).data,
             "alerts": AlertSerializer(alerts, many=True).data,
             "history": history_data,
+            "sensor_errors": sensor_errors,
             "esp32_online": esp32_online,
             "updated_at": timezone.now().isoformat(),
         },
@@ -94,7 +117,11 @@ def _set_mode(mode: str):
         )
     else:
         control.manual_changed_at = timezone.now()
-        control.save(update_fields=["mode", "manual_changed_at", "updated_at"])
+        if not control.manual_reason:
+            control.manual_reason = "frontend_mode_change"
+        control.save(
+            update_fields=["mode", "manual_reason", "manual_changed_at", "updated_at"]
+        )
 
 
 @database_sync_to_async
@@ -176,7 +203,20 @@ class FrontendConsumer(AsyncWebsocketConsumer):
 
         try:
             if msg_type == "mode":
-                await update_mode_only(str(payload.get("value") or ""))
+                mode_value = str(payload.get("value") or "").upper().strip()
+                await update_mode_only(mode_value)
+
+                esp_group = "esp32.esp32-main"
+                await self.channel_layer.group_send(
+                    esp_group,
+                    {
+                        "type": "ws_message",
+                        "event_type": "mode",
+                        "data": {
+                            "value": mode_value,
+                        },
+                    },
+                )
 
                 packet = await build_state_packet()
                 await self.channel_layer.group_send(

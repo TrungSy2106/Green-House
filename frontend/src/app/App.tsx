@@ -15,8 +15,7 @@ import { RealtimeProvider, useRealtime } from "./contexts/RealtimeContext";
 
 function Dashboard() {
   const { logout } = useAuth();
-  const { overview, latest, connected, lastUpdated } = useRealtime();
-
+  const { overview, latest, sensorErrors, connected, lastUpdated } = useRealtime();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeMenu, setActiveMenu] = useState("dashboard");
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -80,7 +79,7 @@ function Dashboard() {
                   Live
                 </span>
               </div>
-              <SensorCards data={latest} />
+              <SensorCards data={latest} sensorErrors={sensorErrors} />
             </section>
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">

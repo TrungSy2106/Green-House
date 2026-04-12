@@ -8,7 +8,7 @@ from django.conf import settings
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .models import Alert, Device, DeviceCommand, DeviceState, SensorData
+from .models import Alert, ControlState, Device, DeviceCommand, DeviceState, SensorData
 from .serializers import DeviceCommandSerializer
 
 
@@ -167,6 +167,89 @@ def notify_pending_commands(device_code: str = 'esp32-main'):
     )
 
 
+def sync_control_mode_from_payload(payload: dict):
+    control, _ = ControlState.objects.get_or_create(singleton_key='main')
+
+    mode = payload.get('mode')
+    auto_mode = payload.get('auto_mode')
+
+    resolved_mode = None
+
+    if isinstance(mode, str):
+        mode = mode.strip().upper()
+        if mode in {ControlState.Mode.AUTO, ControlState.Mode.MANUAL}:
+            resolved_mode = mode
+
+    if resolved_mode is None and auto_mode is not None:
+        resolved_mode = ControlState.Mode.AUTO if _to_bool(auto_mode) else ControlState.Mode.MANUAL
+
+    if resolved_mode is None:
+        return control
+
+    if control.mode != resolved_mode:
+        control.mode = resolved_mode
+
+        if resolved_mode == ControlState.Mode.AUTO:
+            control.manual_reason = ''
+            control.manual_changed_at = None
+            control.save(update_fields=['mode', 'manual_reason', 'manual_changed_at', 'updated_at'])
+        else:
+            control.manual_reason = payload.get('manual_reason') or 'esp_button_mode'
+            control.manual_changed_at = timezone.now()
+            control.save(update_fields=['mode', 'manual_reason', 'manual_changed_at', 'updated_at'])
+
+    return control
+
+
+def sync_sensor_alerts(payload: dict, device_code: str = 'esp32-main'):
+    controller = get_controller(device_code=device_code)
+    metadata = controller.metadata or {}
+
+    previous_errors = metadata.get('sensor_errors') or {}
+    current_errors = payload.get('sensor_errors') or {}
+
+    if not isinstance(current_errors, dict):
+        return
+
+    sensor_titles = {
+        'dht': 'Cảm biến DHT lỗi',
+        'soil': 'Cảm biến độ ẩm đất lỗi',
+        'light': 'Cảm biến ánh sáng lỗi',
+        'gas': 'Cảm biến khí lỗi',
+    }
+
+    changed = False
+
+    for sensor_name, current_value in current_errors.items():
+        current_value = bool(current_value)
+        previous_value = bool(previous_errors.get(sensor_name, False))
+
+        if current_value == previous_value:
+            continue
+
+        changed = True
+
+        if current_value:
+            Alert.objects.create(
+                level=Alert.Level.ERROR,
+                title=sensor_titles.get(sensor_name, f'Cảm biến {sensor_name} lỗi'),
+                message=f'{sensor_titles.get(sensor_name, sensor_name)} trên {controller.name} đang mất dữ liệu hoặc trả giá trị bất thường.',
+                device=controller,
+            )
+        else:
+            Alert.objects.create(
+                level=Alert.Level.SUCCESS,
+                title=f'{sensor_titles.get(sensor_name, sensor_name)} đã hồi phục',
+                message=f'Cảm biến {sensor_name} trên {controller.name} đã hoạt động lại bình thường.',
+                device=controller,
+            )
+
+    if changed:
+        metadata['sensor_errors'] = current_errors
+        controller.metadata = metadata
+        controller.save(update_fields=['metadata', 'updated_at'])
+
+
 def ingest_sensor_payload(payload: dict, device_code: str = 'esp32-main'):
     recorded_raw = payload.get('recorded_at')
     recorded_at = parse_datetime(recorded_raw) if isinstance(recorded_raw, str) else recorded_raw
@@ -189,6 +272,9 @@ def ingest_sensor_payload(payload: dict, device_code: str = 'esp32-main'):
         firmware_version=payload.get('firmware_version'),
         metadata=metadata,
     )
+
+    sync_control_mode_from_payload(payload)
+    sync_sensor_alerts(payload, device_code=device_code)
 
     states = payload.get('device_states') or {}
     state_map = {'fan_on': 'fan', 'pump_on': 'pump', 'light_on': 'light'}
@@ -225,6 +311,8 @@ def ingest_heartbeat_payload(payload: dict, device_code: str = 'esp32-main'):
         firmware_version=payload.get('firmware_version'),
         metadata=metadata,
     )
+
+    sync_control_mode_from_payload(payload)
     return controller
 
 
@@ -258,23 +346,13 @@ def ack_device_command_payload(payload: dict):
     if actual_state is not None:
         actual_on = _to_bool(actual_state)
         state.is_on = actual_on
-        state.desired_on = actual_on
-    elif cmd.value.lower() in {'on', 'off'}:
-        actual_on = cmd.value.lower() == 'on'
+    else:
+        actual_on = str(cmd.value).lower() == 'on'
         state.is_on = actual_on
-        state.desired_on = actual_on
 
+    state.desired_on = actual_on
     state.last_command = cmd.command
     state.last_value = cmd.value
     state.save(update_fields=['is_on', 'desired_on', 'last_command', 'last_value', 'updated_at'])
 
-    sync_device_online(cmd.device)
     return cmd
-
-
-def get_ws_frontend_url() -> str:
-    host = getattr(settings, 'WS_FRONTEND_HOST', 'localhost')
-    port = getattr(settings, 'WS_FRONTEND_PORT', 8000)
-    secure = getattr(settings, 'WS_FRONTEND_SECURE', False)
-    scheme = 'wss' if secure else 'ws'
-    return f'{scheme}://{host}:{port}/ws/frontend/'

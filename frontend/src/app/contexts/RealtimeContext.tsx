@@ -5,6 +5,7 @@ import {
   type ControlState,
   type DeviceItem,
   type GreenhouseStatePacket,
+  type SensorErrors,
   type SensorReading,
 } from "../lib/websocket";
 
@@ -25,6 +26,7 @@ type RealtimeContextType = {
   devices: DeviceItem[];
   alerts: AlertItem[];
   chartHistory: SensorReading[];
+  sensorErrors: SensorErrors;
   connected: boolean;
   lastUpdated: Date | null;
   sendMode: (mode: "AUTO" | "MANUAL") => void;
@@ -50,6 +52,13 @@ function formatUptime(updatedAt?: string | null) {
   return `${Math.floor(hrs / 24)} ngày`;
 }
 
+const defaultSensorErrors: SensorErrors = {
+  dht: false,
+  soil: false,
+  light: false,
+  gas: false,
+};
+
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const socketRef = useRef<GreenhouseWebSocket | null>(null);
 
@@ -58,6 +67,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const [devices, setDevices] = useState<DeviceItem[]>([]);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [chartHistory, setChartHistory] = useState<SensorReading[]>([]);
+  const [sensorErrors, setSensorErrors] = useState<SensorErrors>(defaultSensorErrors);
   const [connected, setConnected] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
@@ -87,11 +97,13 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     const nextAlerts = payload.alerts ?? [];
     const nextControl = payload.control;
     const nextHistory = payload.history ?? [];
+    const nextSensorErrors = payload.sensor_errors ?? defaultSensorErrors;
 
     setLatest(nextLatest);
     setDevices(nextDevices);
     setAlerts(nextAlerts);
     setChartHistory(nextHistory);
+    setSensorErrors(nextSensorErrors);
 
     rebuildOverview(
       nextLatest,
@@ -196,6 +208,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     devices,
     alerts,
     chartHistory,
+    sensorErrors,
     connected,
     lastUpdated,
     sendMode: (mode) => socketRef.current?.sendMode(mode),
@@ -232,15 +245,15 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       });
       socketRef.current?.markAllAlertsRead();
     },
-  }), [overview, latest, devices, alerts, chartHistory, connected, lastUpdated]);
+  }), [overview, latest, devices, alerts, chartHistory, sensorErrors, connected, lastUpdated]);
 
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;
 }
 
 export function useRealtime() {
-  const ctx = useContext(RealtimeContext);
-  if (!ctx) {
+  const context = useContext(RealtimeContext);
+  if (!context) {
     throw new Error("useRealtime must be used within RealtimeProvider");
   }
-  return ctx;
+  return context;
 }

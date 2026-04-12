@@ -7,6 +7,13 @@ export type SensorReading = {
   recorded_at: string;
 };
 
+export type SensorErrors = {
+  dht: boolean;
+  soil: boolean;
+  light: boolean;
+  gas: boolean;
+};
+
 export type ControlState = {
   mode: "AUTO" | "MANUAL";
   manual_reason: string;
@@ -41,6 +48,7 @@ export type GreenhouseStatePacket = {
   devices: DeviceItem[];
   alerts: AlertItem[];
   history: SensorReading[];
+  sensor_errors: SensorErrors;
   esp32_online: boolean;
   updated_at: string | null;
 };
