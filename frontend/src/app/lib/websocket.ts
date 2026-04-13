@@ -122,11 +122,12 @@ export class GreenhouseWebSocket {
     ws.onmessage = (event) => {
       try {
         const parsed = JSON.parse(event.data) as GreenhouseMessage;
+        console.log("Message:", parsed);
         if (parsed && typeof parsed === "object" && "type" in parsed) {
           this.emit("message", parsed);
         }
       } catch {
-        // ignore malformed message
+        // .
       }
     };
   }

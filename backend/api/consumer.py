@@ -217,15 +217,6 @@ class FrontendConsumer(AsyncWebsocketConsumer):
                         },
                     },
                 )
-
-                packet = await build_state_packet()
-                await self.channel_layer.group_send(
-                    frontend_group,
-                    {
-                        "type": "send_state",
-                        "packet": packet,
-                    },
-                )
                 return
 
             if msg_type == "device_control":
@@ -248,31 +239,22 @@ class FrontendConsumer(AsyncWebsocketConsumer):
                         },
                     },
                 )
-
-                packet = await build_state_packet()
-                await self.channel_layer.group_send(
-                    frontend_group,
-                    {
-                        "type": "send_state",
-                        "packet": packet,
-                    },
-                )
                 return
 
             if msg_type in {"alert_mark_read", "alert_mark_all_read"}:
                 return
 
             await self.send(
-                text_data=json.dumps({"type": "error", "reason": f"unsupported:{msg_type}"})
+                text_data=json.dumps(
+                    {"type": "error", "reason": f"unsupported:{msg_type}"}
+                )
             )
 
         except Exception as exc:
             await self.send(text_data=json.dumps({"type": "error", "reason": str(exc)}))
 
     async def send_state(self, event):
-        await self.send(
-            text_data=json.dumps(event["packet"], cls=DjangoJSONEncoder)
-        )
+        await self.send(text_data=json.dumps(event["packet"], cls=DjangoJSONEncoder))
 
 
 class ESPConsumer(AsyncWebsocketConsumer):
@@ -326,13 +308,11 @@ class ESPConsumer(AsyncWebsocketConsumer):
             if msg_type == "heartbeat":
                 await ingest_heartbeat(data, self.device_code)
                 await self.send(text_data=json.dumps({"type": "heartbeat_ack"}))
-                await self.push_state_to_frontend()
                 return
 
             if msg_type == "ack":
                 await ack_command(data)
                 await self.send(text_data=json.dumps({"type": "command_ack_result"}))
-                await self.push_state_to_frontend()
                 return
 
             if msg_type == "sync_commands":

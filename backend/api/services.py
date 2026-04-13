@@ -298,7 +298,6 @@ def ingest_sensor_payload(payload: dict, device_code: str = 'esp32-main'):
         state.last_value = 'on' if current_value else 'off'
         state.save(update_fields=['is_on', 'desired_on', 'last_command', 'last_value', 'updated_at'])
 
-    notify_pending_commands(device_code=device_code)
     return reading
 
 

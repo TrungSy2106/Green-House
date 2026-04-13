@@ -8,22 +8,16 @@ import { SensorHistory } from "./components/SensorHistory";
 import { AutoSettings } from "./components/AutoSettings";
 import { StatusBar } from "./components/StatusBar";
 import { Alerts } from "./components/Alerts";
+import { ForecastPage } from "./components/ForecastPage";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { LoginPage } from "./pages/LoginPage";
-import { RefreshCw } from "lucide-react";
 import { RealtimeProvider, useRealtime } from "./contexts/RealtimeContext";
 
 function Dashboard() {
   const { logout } = useAuth();
-  const { overview, latest, sensorErrors, connected, lastUpdated } = useRealtime();
+  const { overview, latest, sensorErrors } = useRealtime();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeMenu, setActiveMenu] = useState("dashboard");
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    setTimeout(() => setIsRefreshing(false), 600);
-  };
 
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -40,6 +34,7 @@ function Dashboard() {
               {activeMenu === "dashboard" && "Tổng quan hệ thống"}
               {activeMenu === "sensors" && "Quản lý cảm biến"}
               {activeMenu === "history" && "Lịch sử cảm biến"}
+              {activeMenu === "forecast" && "Dự báo sắp tới"}
               {activeMenu === "devices" && "Điều khiển thiết bị"}
               {activeMenu === "zones" && "Quản lý khu vực"}
               {activeMenu === "charts" && "Biểu đồ & Báo cáo"}
@@ -47,17 +42,6 @@ function Dashboard() {
               {activeMenu === "settings" && "Cài đặt hệ thống"}
               {activeMenu === "help" && "Trợ giúp"}
             </h2>
-            {/* <p className="text-slate-500" style={{ fontSize: "12px" }}>
-              {!connected
-                ? "⚠ Mất kết nối WebSocket"
-                : `Cập nhật lần cuối: ${
-                    lastUpdated?.toLocaleTimeString("vi-VN", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      second: "2-digit",
-                    }) ?? "—"
-                  }`}
-            </p> */}
           </div>
         </div>
 
@@ -103,6 +87,8 @@ function Dashboard() {
         )}
 
         {activeMenu === "history" && <SensorHistory />}
+
+        {activeMenu === "forecast" && <ForecastPage />}
 
         {activeMenu === "devices" && (
           <div className="max-w-lg">
