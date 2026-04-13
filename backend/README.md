@@ -1,16 +1,3 @@
-# Smart Greenhouse Backend (MySQL, single greenhouse)
-
-Bản này đã được rút lại đúng scope dự án:
-- 1 nhà kính duy nhất
-- 4 cảm biến cố định: `temperature`, `humidity`, `light`, `soil_moisture`
-- toàn bộ lịch sử cảm biến lưu trong **1 bảng `sensor_data`**
-- 3 thiết bị điều khiển chính: quạt, bơm, đèn
-- frontend dashboard cũ vẫn gọi được API
-
-## 1. Tạo database MySQL
-```sql
-source sql/mysql_init.sql;
-```
 
 ## 2. Cấu hình môi trường
 ```powershell
@@ -26,7 +13,6 @@ Copy-Item .env.example .env
 python manage.py makemigrations api
 python manage.py migrate
 python manage.py createsuperuser
-python manage.py seed_demo
 python manage.py runserver
 ```
 
