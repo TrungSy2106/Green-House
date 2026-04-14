@@ -228,10 +228,10 @@ export function SensorCards({ data, sensorErrors = defaultSensorErrors }: Sensor
                 </span>
               )}
 
-              <span className={`flex items-center gap-1 ${trendColor}`} style={{ fontSize: "11px", fontWeight: 600 }}>
+              {/* <span className={`flex items-center gap-1 ${trendColor}`} style={{ fontSize: "11px", fontWeight: 600 }}>
                 <TrendIcon trend={card.trend} />
                 {card.trendVal}
-              </span>
+              </span> */}
             </div>
           </div>
         );

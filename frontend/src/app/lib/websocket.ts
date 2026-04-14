@@ -4,14 +4,9 @@ export type SensorReading = {
   humidity: number | null;
   light: number | null;
   soil_moisture: number | null;
+  gas: number | null;
+  payload?: Record<string, unknown>;
   recorded_at: string;
-};
-
-export type SensorErrors = {
-  dht: boolean;
-  soil: boolean;
-  light: boolean;
-  gas: boolean;
 };
 
 export type ControlState = {
@@ -42,12 +37,18 @@ export type AlertItem = {
   happened_at: string;
 };
 
+export type SensorErrors = {
+  dht: boolean;
+  soil: boolean;
+  light: boolean;
+  gas: boolean;
+};
+
 export type GreenhouseStatePacket = {
   latest: SensorReading | null;
   control: ControlState;
   devices: DeviceItem[];
   alerts: AlertItem[];
-  history: SensorReading[];
   sensor_errors: SensorErrors;
   esp32_online: boolean;
   updated_at: string | null;
@@ -56,10 +57,6 @@ export type GreenhouseStatePacket = {
 export type GreenhouseMessage =
   | { type: "bootstrap"; data: GreenhouseStatePacket }
   | { type: "state"; data: GreenhouseStatePacket }
-  | { type: "sensor_update"; data: SensorReading }
-  | { type: "device_state"; data: { device: "fan" | "pump" | "light"; is_on: boolean } }
-  | { type: "alert_created"; data: AlertItem }
-  | { type: "command_result"; data: unknown }
   | { type: "error"; data?: unknown; reason?: string };
 
 type ListenerMap = {
@@ -95,7 +92,10 @@ export class GreenhouseWebSocket {
   connect() {
     this.manuallyClosed = false;
 
-    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+    if (
+      this.ws &&
+      (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)
+    ) {
       return;
     }
 
@@ -127,7 +127,7 @@ export class GreenhouseWebSocket {
           this.emit("message", parsed);
         }
       } catch {
-        // .
+        // ignore invalid message
       }
     };
   }

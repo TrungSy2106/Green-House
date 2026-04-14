@@ -41,6 +41,8 @@ const WS_URL =
   (import.meta as any).env?.VITE_WS_URL ||
   `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}:8000/ws/frontend/`;
 
+const MAX_CHART_POINTS = 20;
+
 function formatUptime(updatedAt?: string | null) {
   if (!updatedAt) return "—";
   const diff = Date.now() - new Date(updatedAt).getTime();
@@ -59,6 +61,41 @@ const defaultSensorErrors: SensorErrors = {
   gas: false,
 };
 
+function makePlaceholderReading(index: number): SensorReading {
+  return {
+    id: -(index + 1),
+    temperature: 0,
+    humidity: 0,
+    light: 0,
+    soil_moisture: 0,
+    gas: 0,
+    recorded_at: `0-${index + 1}`,
+  };
+}
+
+function buildInitialChartHistory() {
+  return Array.from({ length: MAX_CHART_POINTS }, (_, index) =>
+    makePlaceholderReading(index)
+  );
+}
+
+function isSameReading(a: SensorReading, b: SensorReading) {
+  if (a.id != null && b.id != null) {
+    return a.id === b.id;
+  }
+  return a.recorded_at === b.recorded_at;
+}
+
+function appendReading(prev: SensorReading[], reading: SensorReading | null) {
+  if (!reading) return prev;
+
+  if (prev.length > 0 && isSameReading(prev[prev.length - 1], reading)) {
+    return prev;
+  }
+
+  return [...prev, reading].slice(-MAX_CHART_POINTS);
+}
+
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const socketRef = useRef<GreenhouseWebSocket | null>(null);
 
@@ -66,7 +103,9 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const [latest, setLatest] = useState<SensorReading | null>(null);
   const [devices, setDevices] = useState<DeviceItem[]>([]);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
-  const [chartHistory, setChartHistory] = useState<SensorReading[]>([]);
+  const [chartHistory, setChartHistory] = useState<SensorReading[]>(() =>
+    buildInitialChartHistory()
+  );
   const [sensorErrors, setSensorErrors] = useState<SensorErrors>(defaultSensorErrors);
   const [connected, setConnected] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -83,7 +122,9 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       latest: nextLatest,
       control: nextControl,
       device_count: nextDevices.filter((d) => d.device_type !== "controller").length,
-      online_devices: nextDevices.filter((d) => d.device_type !== "controller" && d.status === "online").length,
+      online_devices: nextDevices.filter(
+        (d) => d.device_type !== "controller" && d.status === "online"
+      ).length,
       unread_alerts: nextAlerts.filter((a) => !a.is_read).length,
       uptime_hint: formatUptime(updatedAt),
       recent_alerts: nextAlerts.slice(0, 5),
@@ -96,14 +137,13 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     const nextDevices = payload.devices ?? [];
     const nextAlerts = payload.alerts ?? [];
     const nextControl = payload.control;
-    const nextHistory = payload.history ?? [];
     const nextSensorErrors = payload.sensor_errors ?? defaultSensorErrors;
 
     setLatest(nextLatest);
     setDevices(nextDevices);
     setAlerts(nextAlerts);
-    setChartHistory(nextHistory);
     setSensorErrors(nextSensorErrors);
+    setChartHistory((prev) => appendReading(prev, nextLatest));
 
     rebuildOverview(
       nextLatest,
@@ -128,66 +168,6 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     const offMessage = socket.on("message", (msg) => {
       if (msg.type === "bootstrap" || msg.type === "state") {
         applyStatePacket(msg.data);
-        return;
-      }
-
-      if (msg.type === "sensor_update") {
-        setLatest(msg.data);
-        setChartHistory((prev) => [...prev.slice(-119), msg.data]);
-        setLastUpdated(new Date());
-
-        setOverview((prev) =>
-          prev
-            ? {
-                ...prev,
-                latest: msg.data,
-                uptime_hint: formatUptime(msg.data.recorded_at),
-              }
-            : prev
-        );
-        return;
-      }
-
-      if (msg.type === "device_state") {
-        setDevices((prev) => {
-          const nextDevices = prev.map((d) =>
-            d.device_type === msg.data.device
-              ? {
-                  ...d,
-                  state: { ...(d.state ?? { is_on: false }), is_on: msg.data.is_on },
-                }
-              : d
-          );
-
-          setOverview((prevOverview) =>
-            prevOverview
-              ? {
-                  ...prevOverview,
-                  device_count: nextDevices.filter((d) => d.device_type !== "controller").length,
-                  online_devices: nextDevices.filter((d) => d.device_type !== "controller" && d.status === "online").length,
-                }
-              : prevOverview
-          );
-
-          return nextDevices;
-        });
-        return;
-      }
-
-      if (msg.type === "alert_created") {
-        setAlerts((prev) => {
-          const nextAlerts = [msg.data, ...prev];
-          setOverview((prevOverview) =>
-            prevOverview
-              ? {
-                  ...prevOverview,
-                  unread_alerts: nextAlerts.filter((a) => !a.is_read).length,
-                  recent_alerts: nextAlerts.slice(0, 5),
-                }
-              : prevOverview
-          );
-          return nextAlerts;
-        });
       }
     });
 
@@ -202,50 +182,53 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const value = useMemo<RealtimeContextType>(() => ({
-    overview,
-    latest,
-    devices,
-    alerts,
-    chartHistory,
-    sensorErrors,
-    connected,
-    lastUpdated,
-    sendMode: (mode) => socketRef.current?.sendMode(mode),
-    sendDeviceControl: (device, state) => socketRef.current?.sendDeviceControl(device, state),
-    markAlertRead: (id) => {
-      setAlerts((prev) => {
-        const nextAlerts = prev.map((a) => (a.id === id ? { ...a, is_read: true } : a));
-        setOverview((prevOverview) =>
-          prevOverview
-            ? {
-                ...prevOverview,
-                unread_alerts: nextAlerts.filter((a) => !a.is_read).length,
-                recent_alerts: nextAlerts.slice(0, 5),
-              }
-            : prevOverview
-        );
-        return nextAlerts;
-      });
-      socketRef.current?.markAlertRead(id);
-    },
-    markAllAlertsRead: () => {
-      setAlerts((prev) => {
-        const nextAlerts = prev.map((a) => ({ ...a, is_read: true }));
-        setOverview((prevOverview) =>
-          prevOverview
-            ? {
-                ...prevOverview,
-                unread_alerts: 0,
-                recent_alerts: nextAlerts.slice(0, 5),
-              }
-            : prevOverview
-        );
-        return nextAlerts;
-      });
-      socketRef.current?.markAllAlertsRead();
-    },
-  }), [overview, latest, devices, alerts, chartHistory, sensorErrors, connected, lastUpdated]);
+  const value = useMemo<RealtimeContextType>(
+    () => ({
+      overview,
+      latest,
+      devices,
+      alerts,
+      chartHistory,
+      sensorErrors,
+      connected,
+      lastUpdated,
+      sendMode: (mode) => socketRef.current?.sendMode(mode),
+      sendDeviceControl: (device, state) => socketRef.current?.sendDeviceControl(device, state),
+      markAlertRead: (id) => {
+        setAlerts((prev) => {
+          const nextAlerts = prev.map((a) => (a.id === id ? { ...a, is_read: true } : a));
+          setOverview((prevOverview) =>
+            prevOverview
+              ? {
+                  ...prevOverview,
+                  unread_alerts: nextAlerts.filter((a) => !a.is_read).length,
+                  recent_alerts: nextAlerts.slice(0, 5),
+                }
+              : prevOverview
+          );
+          return nextAlerts;
+        });
+        socketRef.current?.markAlertRead(id);
+      },
+      markAllAlertsRead: () => {
+        setAlerts((prev) => {
+          const nextAlerts = prev.map((a) => ({ ...a, is_read: true }));
+          setOverview((prevOverview) =>
+            prevOverview
+              ? {
+                  ...prevOverview,
+                  unread_alerts: 0,
+                  recent_alerts: nextAlerts.slice(0, 5),
+                }
+              : prevOverview
+          );
+          return nextAlerts;
+        });
+        socketRef.current?.markAllAlertsRead();
+      },
+    }),
+    [overview, latest, devices, alerts, chartHistory, sensorErrors, connected, lastUpdated]
+  );
 
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;
 }

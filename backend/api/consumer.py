@@ -1,3 +1,4 @@
+import asyncio
 import json
 from urllib.parse import parse_qs
 
@@ -22,9 +23,11 @@ from .services import (
     ingest_heartbeat_payload,
     ingest_sensor_payload,
     mark_device_offline,
+    refresh_device_statuses,
 )
 
 frontend_group = "frontend"
+FRONTEND_POLL_SECONDS = 3
 
 
 def _control_state():
@@ -33,6 +36,7 @@ def _control_state():
 
 
 def _esp32_online():
+    refresh_device_statuses()
     return Device.objects.filter(
         device_type=Device.DeviceType.CONTROLLER,
         status=Device.DeviceStatus.ONLINE,
@@ -66,15 +70,12 @@ def _dashboard_packet():
     esp32_online = _esp32_online()
     sensor_errors = _current_sensor_errors()
 
+    latest = None
+    latest_data = None
+
     if esp32_online:
         latest = SensorData.objects.order_by("-recorded_at", "-id").first()
-        history = list(SensorData.objects.order_by("-recorded_at", "-id")[:20])
-        history.reverse()
-        history_data = SensorDataSerializer(history, many=True).data
         latest_data = SensorDataSerializer(latest).data if latest else None
-    else:
-        latest_data = None
-        history_data = []
 
     return {
         "type": "state",
@@ -83,7 +84,6 @@ def _dashboard_packet():
             "control": ControlStateSerializer(control).data,
             "devices": DeviceSerializer(Device.objects.order_by("id"), many=True).data,
             "alerts": AlertSerializer(alerts, many=True).data,
-            "history": history_data,
             "sensor_errors": sensor_errors,
             "esp32_online": esp32_online,
             "updated_at": timezone.now().isoformat(),
@@ -179,15 +179,28 @@ def update_mode_only(mode: str):
 
 class FrontendConsumer(AsyncWebsocketConsumer):
     async def connect(self):
+        self.monitor_task = None
+        self.last_esp32_online = None
+
         await self.channel_layer.group_add(frontend_group, self.channel_name)
         await self.accept()
 
         packet = await build_state_packet()
         packet["type"] = "bootstrap"
+        self.last_esp32_online = packet["data"].get("esp32_online")
 
         await self.send(text_data=json.dumps(packet, cls=DjangoJSONEncoder))
 
+        self.monitor_task = asyncio.create_task(self.monitor_status_changes())
+
     async def disconnect(self, close_code):
+        if self.monitor_task:
+            self.monitor_task.cancel()
+            try:
+                await self.monitor_task
+            except asyncio.CancelledError:
+                pass
+
         await self.channel_layer.group_discard(frontend_group, self.channel_name)
 
     async def receive(self, text_data):
@@ -217,6 +230,8 @@ class FrontendConsumer(AsyncWebsocketConsumer):
                         },
                     },
                 )
+
+                await self.send_state({"packet": await build_state_packet()})
                 return
 
             if msg_type == "device_control":
@@ -239,6 +254,8 @@ class FrontendConsumer(AsyncWebsocketConsumer):
                         },
                     },
                 )
+
+                await self.send_state({"packet": await build_state_packet()})
                 return
 
             if msg_type in {"alert_mark_read", "alert_mark_all_read"}:
@@ -254,7 +271,25 @@ class FrontendConsumer(AsyncWebsocketConsumer):
             await self.send(text_data=json.dumps({"type": "error", "reason": str(exc)}))
 
     async def send_state(self, event):
-        await self.send(text_data=json.dumps(event["packet"], cls=DjangoJSONEncoder))
+        packet = event["packet"]
+        self.last_esp32_online = packet.get("data", {}).get("esp32_online")
+        await self.send(text_data=json.dumps(packet, cls=DjangoJSONEncoder))
+
+    async def monitor_status_changes(self):
+        try:
+            while True:
+                await asyncio.sleep(FRONTEND_POLL_SECONDS)
+
+                packet = await build_state_packet()
+                current_online = packet["data"].get("esp32_online")
+
+                if current_online != self.last_esp32_online:
+                    self.last_esp32_online = current_online
+                    await self.send(
+                        text_data=json.dumps(packet, cls=DjangoJSONEncoder)
+                    )
+        except asyncio.CancelledError:
+            pass
 
 
 class ESPConsumer(AsyncWebsocketConsumer):
