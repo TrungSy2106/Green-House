@@ -119,14 +119,17 @@ interface DeviceControlProps {
 }
 
 export function DeviceControl({ control }: DeviceControlProps) {
-  const { devices, sendMode, sendDeviceControl } = useRealtime();
+  const { devices, sensorErrors, sendMode, sendDeviceControl } = useRealtime();
   const [togglingKey, setTogglingKey] = useState<DeviceType | null>(null);
   const [switchingAuto, setSwitchingAuto] = useState(false);
 
   const visibleDevices = useMemo(() => normalizeDevices(devices), [devices]);
   const isAuto = control?.mode === "AUTO";
+  const isAutoLocked = !!sensorErrors?.dht;
 
   const handleToggleAuto = async () => {
+    if (!isAuto && isAutoLocked) return;
+
     setSwitchingAuto(true);
     sendMode(isAuto ? "MANUAL" : "AUTO");
     setTimeout(() => setSwitchingAuto(false), 500);
@@ -167,12 +170,11 @@ export function DeviceControl({ control }: DeviceControlProps) {
         <div className="flex items-center gap-3">
           <button
             onClick={handleToggleAuto}
-            disabled={switchingAuto}
-            className={`px-3 py-2 rounded-xl transition-all duration-300 disabled:opacity-60 flex items-center gap-2 ${
-              isAuto
+            disabled={switchingAuto || (!isAuto && isAutoLocked)}
+            className={`px-3 py-2 rounded-xl transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2 ${isAuto
                 ? "bg-blue-600 text-white hover:bg-blue-700"
                 : "bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200"
-            }`}
+              }`}
             style={{ fontSize: "12px", fontWeight: 700 }}
           >
             {switchingAuto ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Power className="w-3.5 h-3.5" />}
@@ -200,22 +202,19 @@ export function DeviceControl({ control }: DeviceControlProps) {
           return (
             <div
               key={device.device_type}
-              className={`flex items-center gap-4 p-4 rounded-2xl border transition-all duration-300 ${
-                isOn ? "border-blue-100 bg-blue-50/50 shadow-[0_8px_20px_rgba(59,130,246,0.08)]" : "border-slate-200 bg-slate-50/60"
-              } ${isAuto ? "opacity-70" : ""}`}
+              className={`flex items-center gap-4 p-4 rounded-2xl border transition-all duration-300 ${isOn ? "border-blue-100 bg-blue-50/50 shadow-[0_8px_20px_rgba(59,130,246,0.08)]" : "border-slate-200 bg-slate-50/60"
+                } ${isAuto ? "opacity-70" : ""}`}
             >
               <div className="relative w-11 h-11 flex items-center justify-center flex-shrink-0">
                 {isOn && <span className={`absolute inset-0 rounded-xl ${meta.activeGlowClass}`}></span>}
 
                 <div
-                  className={`relative w-11 h-11 rounded-xl flex items-center justify-center transition-all border ${
-                    isOn ? `${meta.iconBg} border-white` : "bg-white border-slate-200"
-                  }`}
+                  className={`relative w-11 h-11 rounded-xl flex items-center justify-center transition-all border ${isOn ? `${meta.iconBg} border-white` : "bg-white border-slate-200"
+                    }`}
                 >
                   <Icon
-                    className={`w-5 h-5 transition-all duration-300 ${
-                      isOn ? `${meta.iconColor} ${meta.activeClass}` : "text-slate-400"
-                    }`}
+                    className={`w-5 h-5 transition-all duration-300 ${isOn ? `${meta.iconColor} ${meta.activeClass}` : "text-slate-400"
+                      }`}
                   />
                 </div>
               </div>
@@ -233,14 +232,12 @@ export function DeviceControl({ control }: DeviceControlProps) {
                 <p className="text-slate-400" style={{ fontSize: "12px" }}>
                   {meta.description}
                 </p>
-
               </div>
 
               <div className="flex flex-col items-end gap-2">
                 <span
-                  className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                    isOn ? "bg-blue-100 text-blue-700" : "bg-slate-200 text-slate-600"
-                  }`}
+                  className={`px-2 py-0.5 rounded-full text-xs font-medium ${isOn ? "bg-blue-100 text-blue-700" : "bg-slate-200 text-slate-600"
+                    }`}
                   style={{ fontSize: "11px" }}
                 >
                   {isOn ? "Bật" : "Tắt"}
@@ -249,17 +246,15 @@ export function DeviceControl({ control }: DeviceControlProps) {
                 <button
                   onClick={() => handleToggle(device.device_type, isOn)}
                   disabled={isAuto || isToggling}
-                  className={`relative w-12 h-6 rounded-full transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed ${
-                    isOn ? "bg-blue-600" : "bg-slate-300"
-                  }`}
+                  className={`relative w-12 h-6 rounded-full transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed ${isOn ? "bg-blue-600" : "bg-slate-300"
+                    }`}
                 >
                   {isToggling ? (
                     <Loader2 className="w-3.5 h-3.5 text-white absolute top-1 left-3.5 animate-spin" />
                   ) : (
                     <span
-                      className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all duration-300 ${
-                        isOn ? "left-6" : "left-0.5"
-                      }`}
+                      className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all duration-300 ${isOn ? "left-6" : "left-0.5"
+                        }`}
                     ></span>
                   )}
                 </button>

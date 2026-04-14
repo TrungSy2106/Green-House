@@ -167,8 +167,25 @@ def notify_pending_commands(device_code: str = 'esp32-main'):
     )
 
 
+def _force_manual_mode(reason: str):
+    control, _ = ControlState.objects.get_or_create(singleton_key='main')
+
+    if control.mode == ControlState.Mode.MANUAL and control.manual_reason == reason:
+        return control
+
+    control.mode = ControlState.Mode.MANUAL
+    control.manual_reason = reason
+    control.manual_changed_at = timezone.now()
+    control.save(update_fields=['mode', 'manual_reason', 'manual_changed_at', 'updated_at'])
+    return control
+
+
 def sync_control_mode_from_payload(payload: dict):
     control, _ = ControlState.objects.get_or_create(singleton_key='main')
+
+    sensor_errors = payload.get('sensor_errors') or {}
+    if isinstance(sensor_errors, dict) and bool(sensor_errors.get('dht', False)):
+        return _force_manual_mode('dht_sensor_error')
 
     mode = payload.get('mode')
     auto_mode = payload.get('auto_mode')
@@ -243,6 +260,9 @@ def sync_sensor_alerts(payload: dict, device_code: str = 'esp32-main'):
                 message=f'Cảm biến {sensor_name} trên {controller.name} đã hoạt động lại bình thường.',
                 device=controller,
             )
+
+    if bool(current_errors.get('dht', False)):
+        _force_manual_mode('dht_sensor_error')
 
     if changed:
         metadata['sensor_errors'] = current_errors

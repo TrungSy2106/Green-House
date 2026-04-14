@@ -108,6 +108,9 @@ def _set_mode(mode: str):
     if mode not in {ControlState.Mode.AUTO, ControlState.Mode.MANUAL}:
         raise ValueError("mode phải là AUTO hoặc MANUAL")
 
+    if mode == ControlState.Mode.AUTO and _current_sensor_errors().get("dht", False):
+        raise ValueError("Không thể bật AUTO khi cảm biến DHT đang lỗi")
+
     control.mode = mode
     if mode == ControlState.Mode.AUTO:
         control.manual_reason = ""
@@ -269,6 +272,7 @@ class FrontendConsumer(AsyncWebsocketConsumer):
 
         except Exception as exc:
             await self.send(text_data=json.dumps({"type": "error", "reason": str(exc)}))
+            await self.send_state({"packet": await build_state_packet()})
 
     async def send_state(self, event):
         packet = event["packet"]
@@ -336,18 +340,15 @@ class ESPConsumer(AsyncWebsocketConsumer):
         try:
             if msg_type == "telemetry":
                 await ingest_telemetry(data, self.device_code)
-                await self.send(text_data=json.dumps({"type": "telemetry_ack"}))
                 await self.push_state_to_frontend()
                 return
 
             if msg_type == "heartbeat":
                 await ingest_heartbeat(data, self.device_code)
-                await self.send(text_data=json.dumps({"type": "heartbeat_ack"}))
                 return
 
             if msg_type == "ack":
                 await ack_command(data)
-                await self.send(text_data=json.dumps({"type": "command_ack_result"}))
                 return
 
             if msg_type == "sync_commands":
