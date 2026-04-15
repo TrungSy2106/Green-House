@@ -1,13 +1,13 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import {
-  GreenhouseWebSocket,
-  type AlertItem,
-  type ControlState,
-  type DeviceItem,
-  type GreenhouseStatePacket,
-  type SensorErrors,
-  type SensorReading,
-} from "../lib/websocket";
+import type {
+  AlertItem,
+  ControlState,
+  DeviceItem,
+  GreenhouseMessage,
+  GreenhouseStatePacket,
+  SensorErrors,
+  SensorReading,
+} from "../lib/greenhouse.types";
 
 export type DashboardOverview = {
   latest: SensorReading | null;
@@ -42,6 +42,7 @@ const WS_URL =
   `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}:8000/ws/frontend/`;
 
 const MAX_CHART_POINTS = 20;
+const RECONNECT_DELAY = 1500;
 
 function formatUptime(updatedAt?: string | null) {
   if (!updatedAt) return "—";
@@ -97,7 +98,7 @@ function appendReading(prev: SensorReading[], reading: SensorReading | null) {
 }
 
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
-  const socketRef = useRef<GreenhouseWebSocket | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
 
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
   const [latest, setLatest] = useState<SensorReading | null>(null);
@@ -158,29 +159,88 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    const socket = new GreenhouseWebSocket(WS_URL);
-    socketRef.current = socket;
+    let ws: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let manuallyClosed = false;
 
-    const offOpen = socket.on("open", () => setConnected(true));
-    const offClose = socket.on("close", () => setConnected(false));
-    const offError = socket.on("error", () => setConnected(false));
-
-    const offMessage = socket.on("message", (msg) => {
-      if (msg.type === "bootstrap" || msg.type === "state") {
-        applyStatePacket(msg.data);
+    const connect = () => {
+      if (
+        ws &&
+        (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)
+      ) {
+        return;
       }
-    });
 
-    socket.connect();
+      ws = new WebSocket(WS_URL);
+      socketRef.current = ws;
+
+      ws.onopen = () => {
+        setConnected(true);
+      };
+
+      ws.onclose = () => {
+        setConnected(false);
+        socketRef.current = null;
+        ws = null;
+
+        if (!manuallyClosed) {
+          if (reconnectTimer) {
+            window.clearTimeout(reconnectTimer);
+          }
+
+          reconnectTimer = window.setTimeout(() => {
+            connect();
+          }, RECONNECT_DELAY);
+        }
+      };
+
+      ws.onerror = () => {
+        setConnected(false);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data) as GreenhouseMessage;
+          console.log("Message:", msg);
+
+          if (msg.type === "bootstrap" || msg.type === "state") {
+            applyStatePacket(msg.data);
+          }
+        } catch {
+          // ignore invalid message
+        }
+      };
+    };
+
+    connect();
 
     return () => {
-      offOpen();
-      offClose();
-      offError();
-      offMessage();
-      socket.disconnect();
+      manuallyClosed = true;
+
+      if (reconnectTimer) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+
+      if (ws) {
+        ws.onopen = null;
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.onmessage = null;
+        ws.close();
+      }
+
+      socketRef.current = null;
+      ws = null;
     };
   }, []);
+
+  const sendRaw = (payload: unknown) => {
+    const ws = socketRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify(payload));
+    return true;
+  };
 
   const value = useMemo<RealtimeContextType>(
     () => ({
@@ -192,8 +252,12 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       sensorErrors,
       connected,
       lastUpdated,
-      sendMode: (mode) => socketRef.current?.sendMode(mode),
-      sendDeviceControl: (device, state) => socketRef.current?.sendDeviceControl(device, state),
+      sendMode: (mode) => {
+        sendRaw({ type: "mode", value: mode });
+      },
+      sendDeviceControl: (device, state) => {
+        sendRaw({ type: "device_control", device, state });
+      },
       markAlertRead: (id) => {
         setAlerts((prev) => {
           const nextAlerts = prev.map((a) => (a.id === id ? { ...a, is_read: true } : a));
@@ -208,7 +272,8 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
           );
           return nextAlerts;
         });
-        socketRef.current?.markAlertRead(id);
+
+        sendRaw({ type: "alert_mark_read", id });
       },
       markAllAlertsRead: () => {
         setAlerts((prev) => {
@@ -224,7 +289,8 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
           );
           return nextAlerts;
         });
-        socketRef.current?.markAllAlertsRead();
+
+        sendRaw({ type: "alert_mark_all_read" });
       },
     }),
     [overview, latest, devices, alerts, chartHistory, sensorErrors, connected, lastUpdated]
