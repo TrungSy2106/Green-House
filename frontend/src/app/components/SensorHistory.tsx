@@ -1,5 +1,16 @@
 import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, Database } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Database,
+  Clock3,
+  Thermometer,
+  Droplets,
+  Sun,
+  Sprout,
+  Calendar,
+  Download,
+} from "lucide-react";
 import { apiClient } from "../api/client";
 import type { SensorReading } from "../api/endpoints";
 
@@ -11,19 +22,7 @@ interface SensorHistoryResponse {
   total_pages: number;
 }
 
-function formatDateTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "--";
-
-  return date.toLocaleString("vi-VN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
+type QuickFilter = "today" | "7days" | "30days" | "all" | "custom";
 
 function formatMetric(value: number | null, unit: string) {
   if (value === null || value === undefined) return "--";
@@ -35,6 +34,77 @@ function toIsoOrEmpty(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return date.toISOString();
+}
+
+function toLocalInputValue(date: Date) {
+  const offset = date.getTimezoneOffset();
+  const local = new Date(date.getTime() - offset * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+function getQuickFilterRange(filter: Exclude<QuickFilter, "custom">) {
+  const now = new Date();
+
+  switch (filter) {
+    case "today": {
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      return {
+        from: toLocalInputValue(start),
+        to: toLocalInputValue(now),
+      };
+    }
+    case "7days": {
+      const start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      return {
+        from: toLocalInputValue(start),
+        to: toLocalInputValue(now),
+      };
+    }
+    case "30days": {
+      const start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      return {
+        from: toLocalInputValue(start),
+        to: toLocalInputValue(now),
+      };
+    }
+    case "all":
+      return {
+        from: "",
+        to: "",
+      };
+  }
+}
+
+function getStatusColor(
+  value: number | null | undefined,
+  type: "temperature" | "humidity" | "light" | "soilMoisture"
+) {
+  if (value === null || value === undefined) return "text-slate-500";
+
+  if (type === "temperature") {
+    if (value < 20 || value > 32) return "text-red-600";
+    if (value < 22 || value > 30) return "text-yellow-600";
+    return "text-green-600";
+  }
+
+  if (type === "humidity") {
+    if (value < 50 || value > 80) return "text-red-600";
+    if (value < 55 || value > 75) return "text-yellow-600";
+    return "text-green-600";
+  }
+
+  if (type === "light") {
+    if (value < 20 || value > 90) return "text-yellow-600";
+    return "text-green-600";
+  }
+
+  if (type === "soilMoisture") {
+    if (value < 55 || value > 75) return "text-red-600";
+    if (value < 60 || value > 72) return "text-yellow-600";
+    return "text-green-600";
+  }
+
+  return "text-slate-600";
 }
 
 async function fetchSensorHistory(params: {
@@ -56,7 +126,9 @@ async function fetchSensorHistory(params: {
     search.set("date_to", params.dateTo);
   }
 
-  return apiClient.get<SensorHistoryResponse>(`/sensor-readings/history/?${search.toString()}`);
+  return apiClient.get<SensorHistoryResponse>(
+    `/sensor-readings/history/?${search.toString()}`
+  );
 }
 
 export function SensorHistory() {
@@ -65,8 +137,10 @@ export function SensorHistory() {
   const [pageSize] = useState(20);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>("custom");
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(false);
   const [error, setError] = useState("");
 
   const invalidRange =
@@ -77,9 +151,16 @@ export function SensorHistory() {
     nextDateFrom = dateFrom,
     nextDateTo = dateTo
   ) => {
+    const isFirstLoad = rows.length === 0 && nextPage === 1;
+
     try {
       setError("");
-      setLoading(true);
+
+      if (isFirstLoad) {
+        setLoading(true);
+      } else {
+        setPageLoading(true);
+      }
 
       const res = await fetchSensorHistory({
         page: nextPage,
@@ -94,10 +175,13 @@ export function SensorHistory() {
       setTotalPages(Math.max(data.total_pages ?? 1, 1));
     } catch {
       setError("Không tải được lịch sử cảm biến.");
-      setRows([]);
-      setTotalPages(1);
+      if (isFirstLoad) {
+        setRows([]);
+        setTotalPages(1);
+      }
     } finally {
       setLoading(false);
+      setPageLoading(false);
     }
   };
 
@@ -108,20 +192,123 @@ export function SensorHistory() {
   }, [page, dateFrom, dateTo]);
 
   const handlePrev = () => {
-    if (page > 1) {
+    if (page > 1 && !pageLoading) {
       setPage((prev) => prev - 1);
     }
   };
 
   const handleNext = () => {
-    if (page < totalPages) {
+    if (page < totalPages && !pageLoading) {
       setPage((prev) => prev + 1);
+    }
+  };
+
+  const applyQuickFilter = (filter: Exclude<QuickFilter, "custom">) => {
+    const range = getQuickFilterRange(filter);
+    setQuickFilter(filter);
+    setPage(1);
+    setDateFrom(range.from);
+    setDateTo(range.to);
+  };
+
+  const handleExportCsv = async () => {
+    try {
+      const allRows: SensorReading[] = [];
+      let currentPage = 1;
+      let lastPage = 1;
+
+      do {
+        const res = await fetchSensorHistory({
+          page: currentPage,
+          pageSize: 500,
+          dateFrom: toIsoOrEmpty(dateFrom) || undefined,
+          dateTo: toIsoOrEmpty(dateTo) || undefined,
+        });
+
+        const data = res.data;
+        allRows.push(...(data.items ?? []));
+        lastPage = Math.max(data.total_pages ?? 1, 1);
+        currentPage += 1;
+      } while (currentPage <= lastPage);
+
+      if (!allRows.length) return;
+
+      const csvContent = [
+        ["Thời gian", "Nhiệt độ (°C)", "Độ ẩm KK (%)", "Ánh sáng (%)", "Độ ẩm đất (%)"],
+        ...allRows.map((row) => [
+          row.recorded_at ? new Date(row.recorded_at).toLocaleString("vi-VN") : "--",
+          row.temperature != null ? Number(row.temperature).toFixed(1) : "",
+          row.humidity != null ? Number(row.humidity).toFixed(1) : "",
+          row.light != null ? Number(row.light).toFixed(1) : "",
+          row.soil_moisture != null ? Number(row.soil_moisture).toFixed(1) : "",
+        ]),
+      ]
+        .map((row) => row.join(","))
+        .join("\n");
+
+      const blob = new Blob(["\uFEFF" + csvContent], {
+        type: "text/csv;charset=utf-8;",
+      });
+
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      link.href = url;
+
+      const dateLabel =
+        dateFrom || dateTo
+          ? `tu-${dateFrom || "dau"}_den-${dateTo || "nay"}`
+          : "tat-ca";
+
+      link.download = `lich-su-cam-bien-${dateLabel}.csv`;
+      link.click();
+
+      URL.revokeObjectURL(url);
+    } catch {
+      setError("Không xuất được file CSV.");
     }
   };
 
   return (
     <div className="space-y-5">
       <div className="elevated-card rounded-3xl p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div className="flex flex-wrap gap-3">
+            {[
+              { id: "today", label: "Hôm nay" },
+              { id: "7days", label: "7 ngày" },
+              { id: "30days", label: "30 ngày" },
+              { id: "all", label: "Tất cả" },
+            ].map((item) => {
+              const active = quickFilter === item.id;
+
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => applyQuickFilter(item.id as Exclude<QuickFilter, "custom">)}
+                  className={`inline-flex items-center gap-2 rounded-2xl px-5 py-3 transition-all ${active
+                      ? "bg-blue-600 text-white shadow-sm"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  style={{ fontSize: "13px", fontWeight: 700 }}
+                >
+                  <Calendar className="w-4 h-4" />
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <button
+            onClick={handleExportCsv}
+            disabled={!rows.length}
+            className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 text-white shadow-sm transition-all hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ fontSize: "13px", fontWeight: 700 }}
+          >
+            <Download className="w-4 h-4" />
+            Xuất CSV
+          </button>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
             <label
@@ -134,6 +321,7 @@ export function SensorHistory() {
               type="datetime-local"
               value={dateFrom}
               onChange={(e) => {
+                setQuickFilter("custom");
                 setPage(1);
                 setDateFrom(e.target.value);
               }}
@@ -153,6 +341,7 @@ export function SensorHistory() {
               type="datetime-local"
               value={dateTo}
               onChange={(e) => {
+                setQuickFilter("custom");
                 setPage(1);
                 setDateTo(e.target.value);
               }}
@@ -203,81 +392,140 @@ export function SensorHistory() {
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full">
-              <thead className="bg-slate-50">
-                <tr>
+          <div
+            className={`overflow-x-auto transition-opacity duration-200 ${pageLoading ? "opacity-60" : "opacity-100"
+              }`}
+          >
+            <table className="w-full min-w-[760px]">
+              <thead>
+                <tr className="bg-gradient-to-r from-blue-50 to-blue-100 border-b border-slate-200">
                   <th
-                    className="text-right px-5 py-3 text-slate-500"
+                    className="text-left px-5 py-4 text-slate-700"
                     style={{ fontSize: "12px", fontWeight: 700 }}
                   >
-                    Nhiệt độ
+                    <div className="flex items-center gap-2">
+                      <Clock3 className="w-4 h-4 text-blue-600" />
+                      Thời gian
+                    </div>
                   </th>
                   <th
-                    className="text-right px-5 py-3 text-slate-500"
+                    className="text-center px-5 py-4 text-slate-700"
                     style={{ fontSize: "12px", fontWeight: 700 }}
                   >
-                    Độ ẩm
+                    <div className="flex items-center justify-center gap-2">
+                      <Thermometer className="w-4 h-4 text-orange-600" />
+                      Nhiệt độ
+                    </div>
                   </th>
                   <th
-                    className="text-right px-5 py-3 text-slate-500"
+                    className="text-center px-5 py-4 text-slate-700"
                     style={{ fontSize: "12px", fontWeight: 700 }}
                   >
-                    Ánh sáng
+                    <div className="flex items-center justify-center gap-2">
+                      <Droplets className="w-4 h-4 text-cyan-600" />
+                      Độ ẩm KK
+                    </div>
                   </th>
                   <th
-                    className="text-right px-5 py-3 text-slate-500"
+                    className="text-center px-5 py-4 text-slate-700"
                     style={{ fontSize: "12px", fontWeight: 700 }}
                   >
-                    Độ ẩm đất
+                    <div className="flex items-center justify-center gap-2">
+                      <Sun className="w-4 h-4 text-yellow-600" />
+                      Ánh sáng
+                    </div>
                   </th>
                   <th
-                    className="text-left px-5 py-3 text-slate-500"
+                    className="text-center px-5 py-4 text-slate-700"
                     style={{ fontSize: "12px", fontWeight: 700 }}
                   >
-                    Thời gian đo
+                    <div className="flex items-center justify-center gap-2">
+                      <Sprout className="w-4 h-4 text-green-600" />
+                      Độ ẩm đất
+                    </div>
                   </th>
                 </tr>
               </thead>
 
               <tbody>
-                {rows.map((row) => (
-                  <tr
-                    key={row.id}
-                    className="border-t border-slate-100 hover:bg-slate-50/70 transition-colors"
-                  >
-                    <td
-                      className="px-5 py-4 text-right text-slate-800"
-                      style={{ fontSize: "13px", fontWeight: 600 }}
+                {rows.map((row, index) => {
+                  const recordedAt = new Date(row.recorded_at);
+
+                  return (
+                    <tr
+                      key={row.id}
+                      className={`border-b border-slate-100 hover:bg-blue-50/30 transition-colors ${index % 2 === 0 ? "bg-white" : "bg-slate-50/50"
+                        }`}
                     >
-                      {formatMetric(row.temperature, "°C")}
-                    </td>
-                    <td
-                      className="px-5 py-4 text-right text-slate-800"
-                      style={{ fontSize: "13px", fontWeight: 600 }}
-                    >
-                      {formatMetric(row.humidity, "%")}
-                    </td>
-                    <td
-                      className="px-5 py-4 text-right text-slate-800"
-                      style={{ fontSize: "13px", fontWeight: 600 }}
-                    >
-                      {formatMetric(row.light, "%")}
-                    </td>
-                    <td
-                      className="px-5 py-4 text-right text-slate-800"
-                      style={{ fontSize: "13px", fontWeight: 600 }}
-                    >
-                      {formatMetric(row.soil_moisture, "%")}
-                    </td>
-                    <td
-                      className="px-5 py-4 text-slate-700 whitespace-nowrap"
-                      style={{ fontSize: "13px", fontWeight: 600 }}
-                    >
-                      {formatDateTime(row.recorded_at)}
-                    </td>
-                  </tr>
-                ))}
+                      <td className="px-5 py-4">
+                        <div>
+                          <p
+                            className="text-slate-800"
+                            style={{ fontSize: "13px", fontWeight: 600 }}
+                          >
+                            {Number.isNaN(recordedAt.getTime())
+                              ? "--"
+                              : recordedAt.toLocaleDateString("vi-VN")}
+                          </p>
+                          <p className="text-slate-400" style={{ fontSize: "11px" }}>
+                            {Number.isNaN(recordedAt.getTime())
+                              ? "--"
+                              : recordedAt.toLocaleTimeString("vi-VN", {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                second: "2-digit",
+                              })}
+                          </p>
+                        </div>
+                      </td>
+
+                      <td className="px-5 py-4 text-center">
+                        <span
+                          className={`font-semibold ${getStatusColor(
+                            row.temperature,
+                            "temperature"
+                          )}`}
+                          style={{ fontSize: "14px" }}
+                        >
+                          {formatMetric(row.temperature, "°C")}
+                        </span>
+                      </td>
+
+                      <td className="px-5 py-4 text-center">
+                        <span
+                          className={`font-semibold ${getStatusColor(
+                            row.humidity,
+                            "humidity"
+                          )}`}
+                          style={{ fontSize: "14px" }}
+                        >
+                          {formatMetric(row.humidity, "%")}
+                        </span>
+                      </td>
+
+                      <td className="px-5 py-4 text-center">
+                        <span
+                          className={`font-semibold ${getStatusColor(row.light, "light")}`}
+                          style={{ fontSize: "14px" }}
+                        >
+                          {formatMetric(row.light, "%")}
+                        </span>
+                      </td>
+
+                      <td className="px-5 py-4 text-center">
+                        <span
+                          className={`font-semibold ${getStatusColor(
+                            row.soil_moisture,
+                            "soilMoisture"
+                          )}`}
+                          style={{ fontSize: "14px" }}
+                        >
+                          {formatMetric(row.soil_moisture, "%")}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -286,7 +534,7 @@ export function SensorHistory() {
         <div className="px-5 py-4 border-t border-slate-200 flex items-center justify-between">
           <button
             onClick={handlePrev}
-            disabled={page <= 1 || invalidRange}
+            disabled={page <= 1 || invalidRange || pageLoading}
             className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50 flex items-center gap-2"
             style={{ fontSize: "13px", fontWeight: 600 }}
           >
@@ -300,7 +548,7 @@ export function SensorHistory() {
 
           <button
             onClick={handleNext}
-            disabled={page >= totalPages || invalidRange}
+            disabled={page >= totalPages || invalidRange || pageLoading}
             className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50 flex items-center gap-2"
             style={{ fontSize: "13px", fontWeight: 600 }}
           >
