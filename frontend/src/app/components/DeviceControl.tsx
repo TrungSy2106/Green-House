@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
-import { Fan, Lightbulb, Droplets, Power, Activity, Zap, Loader2 } from "lucide-react";
-import type { ControlState, DeviceItem } from "../lib/websocket";
+import { Fan, Lightbulb, Droplets, Power, Activity, Zap, Loader2, CloudRain } from "lucide-react";
+import type { ControlState, DeviceItem } from "../lib/greenhouse.types";
 import { useRealtime } from "../contexts/RealtimeContext";
 
 const DEVICE_META: Record<
-  "fan" | "light" | "pump",
+  "fan" | "light" | "pump" | "mist",
   {
     label: string;
     description: string;
@@ -50,9 +50,20 @@ const DEVICE_META: Record<
     activeGlowClass: "device-glow-pump",
     activeProgressClass: "bg-violet-500",
   },
+  mist: {
+    label: "Máy phun sương",
+    description: "Tăng độ ẩm không khí",
+    icon: CloudRain,
+    iconColor: "text-teal-500",
+    iconBg: "bg-teal-50",
+    power: 0,
+    activeClass: "device-icon-mist",
+    activeGlowClass: "device-glow-mist",
+    activeProgressClass: "bg-teal-500",
+  },
 };
 
-type DeviceType = "fan" | "light" | "pump";
+type DeviceType = "fan" | "light" | "pump" | "mist";
 
 type ViewDevice = {
   id: number;
@@ -91,13 +102,21 @@ const DEFAULT_DEVICES: ViewDevice[] = [
     status: "offline",
     state: { is_on: false },
   },
+  {
+    id: 4,
+    name: "Máy phun sương",
+    code: "mist-1",
+    device_type: "mist",
+    status: "offline",
+    state: { is_on: false },
+  },
 ];
 
 function normalizeDevices(devices: DeviceItem[]): ViewDevice[] {
   const picked = new Map<DeviceType, ViewDevice>();
 
   for (const device of devices) {
-    if (device.device_type !== "fan" && device.device_type !== "light" && device.device_type !== "pump") {
+    if (device.device_type !== "fan" && device.device_type !== "light" && device.device_type !== "pump" && device.device_type !== "mist") {
       continue;
     }
 
@@ -144,7 +163,7 @@ export function DeviceControl({ control }: DeviceControlProps) {
 
   const handleAllDevices = async (turnOn: boolean) => {
     if (isAuto) return;
-    (["fan", "pump", "light"] as DeviceType[]).forEach((device) => {
+    (["fan", "pump", "light", "mist"] as DeviceType[]).forEach((device) => {
       sendDeviceControl(device, turnOn ? "ON" : "OFF");
     });
   };

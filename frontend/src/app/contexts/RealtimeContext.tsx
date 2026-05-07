@@ -30,7 +30,7 @@ type RealtimeContextType = {
   connected: boolean;
   lastUpdated: Date | null;
   sendMode: (mode: "AUTO" | "MANUAL") => void;
-  sendDeviceControl: (device: "fan" | "pump" | "light", state: "ON" | "OFF") => void;
+  sendDeviceControl: (device: "fan" | "pump" | "light" | "mist", state: "ON" | "OFF") => void;
   markAlertRead: (id: number) => void;
   markAllAlertsRead: () => void;
 };

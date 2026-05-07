@@ -20,7 +20,7 @@ export type DeviceItem = {
   id: number;
   name: string;
   code: string;
-  device_type: "fan" | "pump" | "light" | "controller";
+  device_type: "fan" | "pump" | "light" | "controller" | "mist";
   status: "online" | "offline";
   state: {
     is_on: boolean;

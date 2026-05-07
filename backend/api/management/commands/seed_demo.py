@@ -49,12 +49,21 @@ class Command(BaseCommand):
                 'status': Device.DeviceStatus.OFFLINE,
             },
         )
+        mist, _ = Device.objects.get_or_create(
+            code='mist-1',
+            defaults={
+                'name': 'Máy phun sương',
+                'device_type': Device.DeviceType.MIST,
+                'status': Device.DeviceStatus.OFFLINE,
+            },
+        )
 
         for device, is_on in [
             (controller, True),
             (fan, False),
             (pump, False),
             (light, False),
+            (mist, False),
         ]:
             DeviceState.objects.update_or_create(
                 device=device,

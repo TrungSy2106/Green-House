@@ -19,6 +19,7 @@ class Device(TimeStampedModel):
         FAN = 'fan', 'Fan'
         PUMP = 'pump', 'Pump'
         LIGHT = 'light', 'Light'
+        MIST = 'mist', 'Mist'
 
     class DeviceStatus(models.TextChoices):
         ONLINE = 'online', 'Online'
