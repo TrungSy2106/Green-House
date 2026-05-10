@@ -25,7 +25,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'channels',
-    'api',
+    'api.apps.ApiConfig',
 ]
 
 MIDDLEWARE = [
@@ -110,7 +110,19 @@ CORS_ALLOWED_ORIGINS = [
 
 INGEST_DEVICE_TOKEN = os.getenv('INGEST_DEVICE_TOKEN', 'esp32-local-token')
 APP_ZONE_ID = 1
+ARX_MODEL_PATH = os.getenv(
+    'ARX_MODEL_PATH',
+    str(BASE_DIR.parent.parent / 'ARX' / 'arx_model.json'),
+)
 APP_ZONE_NAME = 'Nhà kính chính'
+
+KALMAN_LIVE_Q = float(os.getenv('KALMAN_LIVE_Q', '12.0'))
+KALMAN_LIVE_R0 = float(os.getenv('KALMAN_LIVE_R0', '1.0'))
+KALMAN_LIVE_R_MIN = float(os.getenv('KALMAN_LIVE_R_MIN', '0.25'))
+KALMAN_LIVE_R_MAX = float(os.getenv('KALMAN_LIVE_R_MAX', '4.0'))
+KALMAN_LIVE_ALPHA = float(os.getenv('KALMAN_LIVE_ALPHA', '0.5'))
+AMPC_RAW_FALLBACK_DELTA = float(os.getenv('AMPC_RAW_FALLBACK_DELTA', '8.0'))
+KALMAN_TEST_DB_NAME = os.getenv('KALMAN_TEST_DB_NAME', 'kalman_greenhouse')
 
 # Dev-friendly channel layer. Sau này scale nhiều process thì đổi sang Redis.
 CHANNEL_LAYERS = {

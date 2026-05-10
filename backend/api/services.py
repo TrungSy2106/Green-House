@@ -8,7 +8,7 @@ from django.conf import settings
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .models import Alert, ControlState, Device, DeviceCommand, DeviceState, SensorData
+from .models import Alert, ControlState, Device, DeviceCommand, DeviceState, Greenhouse, SensorData
 from .serializers import DeviceCommandSerializer
 
 
@@ -16,15 +16,26 @@ HEARTBEAT_TIMEOUT_SECONDS = 15
 HEARTBEAT_SLOW_SECONDS = 30
 
 
-def get_controller(device_code: str = 'esp32-main') -> Device:
+def get_controller(device_code: str = 'esp32-main', *, greenhouse: Greenhouse | None = None) -> Device:
+    queryset = Device.objects.filter(code=device_code)
+    if greenhouse is not None:
+        queryset = queryset.filter(greenhouse=greenhouse)
+    existing = queryset.first()
+    if existing is not None:
+        return existing
+
     controller, _ = Device.objects.get_or_create(
         code=device_code,
         defaults={
             'name': 'ESP32 Main',
+            'greenhouse': greenhouse,
             'device_type': Device.DeviceType.CONTROLLER,
             'status': Device.DeviceStatus.OFFLINE,
         },
     )
+    if greenhouse is not None and controller.greenhouse_id is None:
+        controller.greenhouse = greenhouse
+        controller.save(update_fields=['greenhouse', 'updated_at'])
     return controller
 
 
@@ -218,8 +229,8 @@ def sync_control_mode_from_payload(payload: dict):
     return control
 
 
-def sync_sensor_alerts(payload: dict, device_code: str = 'esp32-main'):
-    controller = get_controller(device_code=device_code)
+def sync_sensor_alerts(payload: dict, device_code: str = 'esp32-main', *, greenhouse: Greenhouse | None = None):
+    controller = get_controller(device_code=device_code, greenhouse=greenhouse)
     metadata = controller.metadata or {}
 
     previous_errors = metadata.get('sensor_errors') or {}
@@ -270,12 +281,13 @@ def sync_sensor_alerts(payload: dict, device_code: str = 'esp32-main'):
         controller.save(update_fields=['metadata', 'updated_at'])
 
 
-def ingest_sensor_payload(payload: dict, device_code: str = 'esp32-main'):
+def ingest_sensor_payload(payload: dict, device_code: str = 'esp32-main', *, greenhouse: Greenhouse | None = None):
     recorded_raw = payload.get('recorded_at')
     recorded_at = parse_datetime(recorded_raw) if isinstance(recorded_raw, str) else recorded_raw
     recorded_at = recorded_at or timezone.now()
 
     reading = SensorData.objects.create(
+        greenhouse=greenhouse,
         temperature=payload.get('temperature'),
         humidity=payload.get('humidity'),
         light=payload.get('light'),
@@ -284,7 +296,7 @@ def ingest_sensor_payload(payload: dict, device_code: str = 'esp32-main'):
         recorded_at=recorded_at,
     )
 
-    controller = get_controller(device_code=device_code)
+    controller = get_controller(device_code=device_code, greenhouse=greenhouse)
     metadata = payload.get('metadata') or {}
     metadata = {**metadata, 'transport': 'websocket'}
     sync_device_online(
@@ -294,7 +306,7 @@ def ingest_sensor_payload(payload: dict, device_code: str = 'esp32-main'):
     )
 
     sync_control_mode_from_payload(payload)
-    sync_sensor_alerts(payload, device_code=device_code)
+    sync_sensor_alerts(payload, device_code=device_code, greenhouse=greenhouse)
 
     states = payload.get('device_states') or {}
     state_map = {'fan_on': 'fan', 'pump_on': 'pump', 'light_on': 'light'}
@@ -303,7 +315,10 @@ def ingest_sensor_payload(payload: dict, device_code: str = 'esp32-main'):
         if field_name not in states:
             continue
 
-        device = Device.objects.filter(device_type=device_type).first()
+        devices = Device.objects.filter(device_type=device_type)
+        if greenhouse is not None:
+            devices = devices.filter(greenhouse=greenhouse)
+        device = devices.first()
         if not device:
             continue
 
@@ -321,8 +336,8 @@ def ingest_sensor_payload(payload: dict, device_code: str = 'esp32-main'):
     return reading
 
 
-def ingest_heartbeat_payload(payload: dict, device_code: str = 'esp32-main'):
-    controller = get_controller(device_code=device_code)
+def ingest_heartbeat_payload(payload: dict, device_code: str = 'esp32-main', *, greenhouse: Greenhouse | None = None):
+    controller = get_controller(device_code=device_code, greenhouse=greenhouse)
     metadata = payload.get('metadata') or {}
     metadata = {**metadata, 'uptime_ms': payload.get('uptime_ms'), 'free_heap': payload.get('free_heap')}
     sync_device_online(

@@ -4,9 +4,11 @@
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r requirements-local.txt
 Copy-Item .env.example .env
 ```
+
+`requirements-local.txt` installs the Django backend plus editable local packages from `../../Kalman` and `../../MPC`. Use `requirements.txt` only for the base Django dependencies.
 
 ## 3. Khởi tạo project
 ```powershell
@@ -27,10 +29,22 @@ python manage.py runserver
 - `GET /api/alerts/`
 - `POST /api/alerts/{id}/mark_read/`
 - `POST /api/alerts/mark_all_read/`
-- `GET /api/rules/`
-- `PATCH /api/rules/{id}/`
+- `GET /api/forecast/`
+- `GET /api/auto-settings/`
+- `PATCH /api/auto-settings/`
+- `POST /api/control/auto-recommendation/`
 
-## 5. API cho ESP32
+## 5. API compatibility Server cu
+- `GET /api/runs/`
+- `GET /api/runs/{run_id}/series/`
+- `GET /api/runs/{run_id}/metrics/`
+- `GET /api/greenhouses/{greenhouse_id}/control-profile/`
+- `PATCH /api/greenhouses/{greenhouse_id}/control-profile/`
+- `POST /api/greenhouses/{greenhouse_id}/ampc/recommendations/`
+- `GET /api/greenhouses/{greenhouse_id}/ampc/recommendations/latest/`
+- `POST /api/ingest/samples/`
+
+## 6. API cho ESP32
 Header bắt buộc:
 ```http
 X-Device-Token: esp32-local-token

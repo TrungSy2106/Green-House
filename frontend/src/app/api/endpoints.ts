@@ -20,6 +20,158 @@ export const getControlState = () =>
 export const setControlMode = (mode: "AUTO" | "MANUAL", reason = "") =>
   apiClient.post<ControlState>("/control/mode/", { mode, reason });
 
+export interface ControlProfile {
+  crop_name: string;
+  crop_kc: number;
+  target_low: number;
+  target_high: number;
+  step_seconds: number;
+  horizon_steps: number;
+  pump_min_seconds: number;
+  pump_max_seconds: number;
+  pump_grid_seconds: number;
+  soft_daily_pump_cap_seconds: number;
+  weight_band: number;
+  weight_water: number;
+  weight_switch: number;
+  weight_daily: number;
+  weight_terminal: number;
+  adaptive_enabled: boolean;
+  adaptive_bias_window: number;
+  adaptive_max_abs_bias: number;
+  stale_after_seconds: number;
+  actuator_enabled: boolean;
+  updated_at: string;
+}
+
+export const getAutoSettings = () =>
+  apiClient.get<ControlProfile>("/auto-settings/");
+export const updateAutoSettings = (payload: Partial<ControlProfile>) =>
+  apiClient.patch<ControlProfile>("/auto-settings/", payload);
+
+export interface EstimationCycle {
+  id?: number;
+  greenhouse_id?: number;
+  sensor_data?: number;
+  sample_ts: string;
+  cycle_index: number;
+  slice_type?: string;
+  validation_status: string;
+  validation_reason?: string;
+  preprocess_status: string;
+  cycle_status: string;
+  adaptive_status: string;
+  raw_soil_moisture: number | null;
+  arx_predicted: number | null;
+  kf_x_posterior: number | null;
+  kf_innovation?: number | null;
+  kf_R: number | null;
+  kf_K?: number | null;
+  latency_ms: number | null;
+  error_message?: string;
+}
+
+export interface RunItem {
+  id: number;
+  name: string;
+  run_type: string;
+  status: string;
+  greenhouse_id: number | null;
+  greenhouse_name: string;
+  created_at: string;
+}
+
+export const getRuns = () => apiClient.get<RunItem[]>("/runs/");
+export const getRunSeries = (runId: number, limit = 500) =>
+  apiClient.get<EstimationCycle[]>(`/runs/${runId}/series/?limit=${limit}`);
+
+export interface KalmanTestSeriesResponse {
+  source_database: string;
+  source_table: string;
+  limit: number;
+  total_selected: number;
+  points: EstimationCycle[];
+}
+
+export const getKalmanTestSeries = (limit = 100000) =>
+  apiClient.get<KalmanTestSeriesResponse>(`/kalman-test/series/?limit=${limit}`);
+
+export interface MPCTestPoint {
+  timestamp: string;
+  actual_soil_moisture: number | null;
+  mpc_soil_moisture: number | null;
+  rule_based_soil_moisture: number | null;
+  mpc_pump_seconds: number | null;
+  rule_based_pump_seconds: number | null;
+  target_low: number;
+  target_high: number;
+  safety_status: string;
+  reason: string;
+}
+
+export interface MPCTestSeriesResponse {
+  greenhouse_id: number;
+  source_table: string;
+  total_selected: number;
+  points: MPCTestPoint[];
+}
+
+export const getMPCTestSeries = () =>
+  apiClient.get<MPCTestSeriesResponse>("/mpc-test/series/");
+
+export interface AMPCRecommendation {
+  id: number;
+  sensor_data: number | null;
+  estimation: number | null;
+  device_command: number | null;
+  mode: "AUTO" | "MANUAL";
+  pump_seconds: number;
+  step_seconds: number;
+  predicted_soil_moisture: number[];
+  target_band: { low?: number; high?: number };
+  objective_cost: number;
+  safety_status: string;
+  reason: string;
+  bias_correction: number;
+  bias_window_count: number;
+  used_today_pump_seconds: number;
+  command_created: boolean;
+  actuator_status: string;
+  created_at: string;
+}
+
+export interface AMPCSchedulerState {
+  greenhouse_id: number | null;
+  is_enabled: boolean;
+  interval_seconds: number;
+  is_executing: boolean;
+  last_started_at: string | null;
+  last_stopped_at: string | null;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  last_status: string;
+  last_error: string;
+  updated_at: string;
+}
+
+export interface ForecastResponse {
+  latest: SensorReading | null;
+  estimation: EstimationCycle | null;
+  recommendation: AMPCRecommendation | null;
+  scheduler: AMPCSchedulerState;
+  history: SensorReading[];
+}
+
+export const getForecast = () => apiClient.get<ForecastResponse>("/forecast/");
+export const runAutoRecommendation = () =>
+  apiClient.post<AMPCRecommendation>("/control/auto-recommendation/");
+export const getAmpcScheduler = () =>
+  apiClient.get<AMPCSchedulerState>("/control/ampc-scheduler/");
+export const startAmpcScheduler = () =>
+  apiClient.post<AMPCSchedulerState>("/control/ampc-scheduler/start/");
+export const stopAmpcScheduler = () =>
+  apiClient.post<AMPCSchedulerState>("/control/ampc-scheduler/stop/");
+
 // ─── Dashboard ───────────────────────────────────────────────────────────────
 export interface DashboardOverview {
   latest: SensorReading | null;
