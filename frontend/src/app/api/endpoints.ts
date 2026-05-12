@@ -20,9 +20,22 @@ export const getControlState = () =>
 export const setControlMode = (mode: "AUTO" | "MANUAL", reason = "") =>
   apiClient.post<ControlState>("/control/mode/", { mode, reason });
 
+export type FaoSoilType = "sand" | "light_loam" | "loam" | "clay_loam";
+
 export interface ControlProfile {
   crop_name: string;
   crop_kc: number;
+  latitude: number;
+  longitude: number;
+  soil_type: FaoSoilType;
+  theta_fc: number;
+  theta_wp: number;
+  theta_sat: number;
+  root_depth_m: number;
+  depletion_fraction_p: number;
+  pump_efficiency: number;
+  pump_flow_lps: number;
+  irrigation_area_m2: number;
   target_low: number;
   target_high: number;
   step_seconds: number;
@@ -85,40 +98,6 @@ export const getRuns = () => apiClient.get<RunItem[]>("/runs/");
 export const getRunSeries = (runId: number, limit = 500) =>
   apiClient.get<EstimationCycle[]>(`/runs/${runId}/series/?limit=${limit}`);
 
-export interface KalmanTestSeriesResponse {
-  source_database: string;
-  source_table: string;
-  limit: number;
-  total_selected: number;
-  points: EstimationCycle[];
-}
-
-export const getKalmanTestSeries = (limit = 100000) =>
-  apiClient.get<KalmanTestSeriesResponse>(`/kalman-test/series/?limit=${limit}`);
-
-export interface MPCTestPoint {
-  timestamp: string;
-  actual_soil_moisture: number | null;
-  mpc_soil_moisture: number | null;
-  rule_based_soil_moisture: number | null;
-  mpc_pump_seconds: number | null;
-  rule_based_pump_seconds: number | null;
-  target_low: number;
-  target_high: number;
-  safety_status: string;
-  reason: string;
-}
-
-export interface MPCTestSeriesResponse {
-  greenhouse_id: number;
-  source_table: string;
-  total_selected: number;
-  points: MPCTestPoint[];
-}
-
-export const getMPCTestSeries = () =>
-  apiClient.get<MPCTestSeriesResponse>("/mpc-test/series/");
-
 export interface AMPCRecommendation {
   id: number;
   sensor_data: number | null;
@@ -137,7 +116,41 @@ export interface AMPCRecommendation {
   used_today_pump_seconds: number;
   command_created: boolean;
   actuator_status: string;
+  config_snapshot?: Record<string, unknown> | null;
+  state_snapshot?: AMPCStateSnapshot | null;
   created_at: string;
+}
+
+export interface Fao56Audit {
+  initial_theta?: number | null;
+  initial_dr?: number | null;
+  taw?: number | null;
+  raw?: number | null;
+  ks?: number | null;
+  et0_step?: number | null;
+  etc_adj?: number | null;
+  irrigation_depth_mm?: number | null;
+  predicted_dr?: Array<number | null>;
+  predicted_soil_moisture?: Array<number | null>;
+}
+
+export interface ET0Audit {
+  requested_hour?: string;
+  et0_hour_mm?: number | null;
+  et0_step_mm?: number | null;
+  step_seconds?: number | null;
+  source?: string;
+  fetched_at?: string;
+  reason?: string;
+  fail_closed?: boolean;
+}
+
+export interface AMPCStateSnapshot {
+  fao56?: Fao56Audit | null;
+  et0?: ET0Audit | null;
+  fail_closed?: boolean;
+  config_error?: string;
+  [key: string]: unknown;
 }
 
 export interface AMPCSchedulerState {

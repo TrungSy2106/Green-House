@@ -14,6 +14,19 @@ class TimeStampedModel(models.Model):
         abstract = True
 
 
+FAO56_SOIL_PRESETS = {
+    'sand': {'theta_fc': 0.10, 'theta_wp': 0.04, 'theta_sat': 0.45},
+    'light_loam': {'theta_fc': 0.15, 'theta_wp': 0.06, 'theta_sat': 0.45},
+    'loam': {'theta_fc': 0.32, 'theta_wp': 0.15, 'theta_sat': 0.45},
+    'clay_loam': {'theta_fc': 0.35, 'theta_wp': 0.23, 'theta_sat': 0.45},
+}
+
+FAO56_SOIL_TYPE_CHOICES = [
+    (soil_type, soil_type.replace('_', ' ').title())
+    for soil_type in FAO56_SOIL_PRESETS
+]
+
+
 class Greenhouse(TimeStampedModel):
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -140,7 +153,7 @@ class Device(TimeStampedModel):
         ERROR = 'error', 'Error'
 
     name = models.CharField(max_length=100)
-    code = models.CharField(max_length=50, unique=True)
+    code = models.CharField(max_length=50)
     greenhouse = models.ForeignKey(
         Greenhouse,
         null=True,
@@ -163,6 +176,9 @@ class Device(TimeStampedModel):
 
     class Meta:
         ordering = ['id']
+        constraints = [
+            models.UniqueConstraint(fields=['greenhouse', 'code'], name='uq_device_greenhouse_code'),
+        ]
 
     def save(self, *args, **kwargs):
         if not self.api_token:
@@ -331,6 +347,14 @@ class ControlState(TimeStampedModel):
         verbose_name = 'Control state'
         verbose_name_plural = 'Control state'
 
+    @classmethod
+    def singleton_key_for_greenhouse(cls, greenhouse_id: int) -> str:
+        max_length = cls._meta.get_field('singleton_key').max_length
+        legacy_key = f'greenhouse:{greenhouse_id}'
+        if len(legacy_key) <= max_length:
+            return legacy_key
+        return f'gh:{int(greenhouse_id):x}'
+
     def __str__(self):
         return f'Control<{self.mode}>'
 
@@ -409,6 +433,17 @@ class GreenhouseControlProfile(TimeStampedModel):
     )
     crop_name = models.CharField(max_length=100, default='Default crop')
     crop_kc = models.FloatField(default=1.0)
+    latitude = models.FloatField(default=16.0471)
+    longitude = models.FloatField(default=108.2068)
+    soil_type = models.CharField(max_length=32, choices=FAO56_SOIL_TYPE_CHOICES, default='loam')
+    theta_fc = models.FloatField(default=0.32)
+    theta_wp = models.FloatField(default=0.15)
+    theta_sat = models.FloatField(default=0.45)
+    root_depth_m = models.FloatField(default=0.30)
+    depletion_fraction_p = models.FloatField(default=0.5)
+    pump_efficiency = models.FloatField(default=0.8)
+    pump_flow_lps = models.FloatField(default=0.02)
+    irrigation_area_m2 = models.FloatField(default=0.25)
 
     target_low = models.FloatField(default=55.0)
     target_high = models.FloatField(default=65.0)
